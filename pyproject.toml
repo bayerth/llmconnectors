@@ -41,7 +41,7 @@ dev = ["pytest>=8.0", "python-dotenv>=1.0"]
 [project.urls]
 Homepage = "https://pypi.org/project/llmconnector-thomas-bayer/"
 Documentation = "https://pypi.org/project/llmconnector-thomas-bayer/"
-# Repository = "https://github.com/<user>/<repo>"  # add when the repo is published
+Repository = "https://github.com/bayerth/llmconnectors.git"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/llmconnector_thomas_bayer"]
