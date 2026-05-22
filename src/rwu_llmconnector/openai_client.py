@@ -1,7 +1,7 @@
 """OpenAI Chat Completions client."""
 
 import time
-from llmconnector_thomas_bayer.llmconnector import LLMCClient
+from rwu_llmconnector.llmconnector import LLMCClient
 
 
 class OpenAIClient(LLMCClient):

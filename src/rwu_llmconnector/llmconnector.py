@@ -35,7 +35,7 @@ class FunctionHandler(logging.Handler):
 
 
 # Name used by logging.getLogger(); tune levels via logging.getLogger(DEFAULT_LOGGER_NAME)
-DEFAULT_LOGGER_NAME = "llmconnector"
+DEFAULT_LOGGER_NAME = "rwu_llmconnector"
 
 
 def get_print_logger(

@@ -3,7 +3,7 @@ import os
 import pytest
 from openai import OpenAI
 
-from llmconnector_thomas_bayer.openai_client import OpenAIClient
+from rwu_llmconnector.openai_client import OpenAIClient
 from tests.conftest import assert_llm_response, requires_openai, run_client_query
 
 

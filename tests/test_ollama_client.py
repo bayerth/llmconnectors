@@ -2,7 +2,7 @@ import os
 
 import pytest
 
-from llmconnector_thomas_bayer.ollama_client import OllamaClient
+from rwu_llmconnector.ollama_client import OllamaClient
 from tests.conftest import assert_llm_response, requires_ollama, run_client_query
 
 

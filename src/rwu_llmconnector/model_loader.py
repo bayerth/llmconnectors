@@ -2,9 +2,9 @@
 
 import os
 from openai import OpenAI
-from llmconnector_thomas_bayer.openai_client import OpenAIClient
-from llmconnector_thomas_bayer.lmstudio_client import LMStudioClient
-from llmconnector_thomas_bayer.ollama_client import OllamaClient
+from rwu_llmconnector.openai_client import OpenAIClient
+from rwu_llmconnector.lmstudio_client import LMStudioClient
+from rwu_llmconnector.ollama_client import OllamaClient
 
 # Named presets: mac_studio/local use LM Studio; openai uses the official API; ollama is separate
 MODELS_CONFIG = {

@@ -2,7 +2,7 @@ import os
 
 import pytest
 
-from llmconnector_thomas_bayer.lmstudio_client import LMStudioClient, StatefulLMStudioClient
+from rwu_llmconnector.lmstudio_client import LMStudioClient, StatefulLMStudioClient
 from tests.conftest import assert_llm_response, requires_lmstudio, run_client_query
 
 

@@ -1,4 +1,4 @@
-# llmconnector-thomas-bayer
+# rwu-llmconnector
 
 Unified Python connectors for calling large language models through a common interface.
 
@@ -12,7 +12,7 @@ Supported backends:
 ## Installation
 
 ```bash
-pip install llmconnector-thomas-bayer
+pip install rwu-llmconnector
 ```
 
 With a virtual environment (recommended):
@@ -20,7 +20,7 @@ With a virtual environment (recommended):
 ```bash
 python -m venv .venv
 source .venv/bin/activate   # Windows: .venv\Scripts\activate
-pip install llmconnector-thomas-bayer
+pip install rwu-llmconnector
 ```
 
 ## Quick start
@@ -29,7 +29,7 @@ pip install llmconnector-thomas-bayer
 
 ```python
 from openai import OpenAI
-from llmconnector_thomas_bayer import OpenAIClient
+from rwu_llmconnector import OpenAIClient
 
 client = OpenAI(api_key="your-openai-api-key")
 llm = OpenAIClient(client, model="gpt-4o-mini")
@@ -45,7 +45,7 @@ print(response)
 
 ```python
 from google import genai
-from llmconnector_thomas_bayer import GeminiClient
+from rwu_llmconnector import GeminiClient
 
 client = genai.Client(api_key="your-gemini-api-key")
 llm = GeminiClient(client, model="gemini-2.5-flash-lite")
@@ -60,7 +60,7 @@ print(response)
 ### Ollama
 
 ```python
-from llmconnector_thomas_bayer import OllamaClient
+from rwu_llmconnector import OllamaClient
 
 llm = OllamaClient(model="llama3.2", host="http://localhost:11434")
 
@@ -74,7 +74,7 @@ print(response)
 ### LM Studio
 
 ```python
-from llmconnector_thomas_bayer import LMStudioClient
+from rwu_llmconnector import LMStudioClient
 
 llm = LMStudioClient(
     model="qwen/qwen3-4b-2507",
@@ -94,7 +94,7 @@ For server-side conversation state, use `StatefulLMStudioClient` instead of `LMS
 ### Model loader helpers
 
 ```python
-from llmconnector_thomas_bayer.model_loader import load_openai_model, load_ollama_model
+from rwu_llmconnector.model_loader import load_openai_model, load_ollama_model
 
 llm = load_openai_model("gpt-4o-mini", env="openai")
 ollama = load_ollama_model("llama3.2")
@@ -130,7 +130,7 @@ Tests load variables from `.env` via `python-dotenv`. See `.env.example` for sup
 ## Project layout
 
 ```
-src/llmconnector_thomas_bayer/   # library code
+src/rwu_llmconnector/   # library code
 tests/                           # integration tests
 pyproject.toml
 uv.lock                          # pinned dev dependencies

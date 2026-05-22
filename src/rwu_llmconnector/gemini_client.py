@@ -2,7 +2,7 @@
 
 import time
 from google.genai import types
-from llmconnector_thomas_bayer.llmconnector import LLMCClient, default_logger
+from rwu_llmconnector.llmconnector import LLMCClient, default_logger
 
 
 class GeminiClient(LLMCClient):

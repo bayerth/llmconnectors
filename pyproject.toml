@@ -3,7 +3,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "llmconnector-thomas-bayer"
+name = "rwu-llmconnector"
 version = "0.1.0"
 description = "Unified LLM connectors for OpenAI, Google Gemini, Ollama, and LM Studio."
 readme = "README.md"
@@ -39,12 +39,12 @@ dependencies = [
 dev = ["pytest>=8.0", "python-dotenv>=1.0"]
 
 [project.urls]
-Homepage = "https://pypi.org/project/llmconnector-thomas-bayer/"
-Documentation = "https://pypi.org/project/llmconnector-thomas-bayer/"
+Homepage = "https://pypi.org/project/rwu-llmconnector/"
+Documentation = "https://pypi.org/project/rwu-llmconnector/"
 Repository = "https://github.com/bayerth/llmconnectors.git"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/llmconnector_thomas_bayer"]
+packages = ["src/rwu_llmconnector"]
 
 [dependency-groups]
 dev = ["pytest>=8.0", "python-dotenv>=1.0"]

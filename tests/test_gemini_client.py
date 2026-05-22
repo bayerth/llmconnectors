@@ -3,7 +3,7 @@ import os
 import pytest
 from google import genai
 
-from llmconnector_thomas_bayer.gemini_client import GeminiClient
+from rwu_llmconnector.gemini_client import GeminiClient
 from tests.conftest import assert_llm_response, requires_gemini, run_client_query
 
 

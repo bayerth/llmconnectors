@@ -2,7 +2,7 @@
 
 import time
 from ollama import Client
-from llmconnector_thomas_bayer.llmconnector import LLMCClient, default_logger
+from rwu_llmconnector.llmconnector import LLMCClient, default_logger
 
 
 class OllamaClient(LLMCClient):

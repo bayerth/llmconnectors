@@ -3,7 +3,7 @@
 import os
 import time
 import requests
-from llmconnector_thomas_bayer.llmconnector import LLMCClient
+from rwu_llmconnector.llmconnector import LLMCClient
 
 DEFAULT_LMSTUDIO_BASE_URL = os.getenv("LMSTUDIO_BASE_URL", "http://localhost:1234")
 DEFAULT_LMSTUDIO_API_KEY = os.getenv("LMSTUDIO_API_KEY") or os.getenv("MAC_STUDIO_API_KEY")
