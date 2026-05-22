@@ -1,0 +1,54 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "llmconnector-thomas-bayer"
+version = "0.1.0"
+description = "Unified LLM connectors for OpenAI, Google Gemini, Ollama, and LM Studio."
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+requires-python = ">=3.10"
+authors = [
+    { name = "Thomas Bayer" },
+]
+keywords = ["llm", "openai", "gemini", "ollama", "lmstudio", "connector"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Typing :: Typed",
+]
+dependencies = [
+    "google-genai",
+    "ollama",
+    "openai",
+    "requests",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0", "python-dotenv>=1.0"]
+
+[project.urls]
+Homepage = "https://pypi.org/project/llmconnector-thomas-bayer/"
+Documentation = "https://pypi.org/project/llmconnector-thomas-bayer/"
+# Repository = "https://github.com/<user>/<repo>"  # add when the repo is published
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/llmconnector_thomas_bayer"]
+
+[dependency-groups]
+dev = ["pytest>=8.0", "python-dotenv>=1.0"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src", "."]
+testpaths = ["tests"]
