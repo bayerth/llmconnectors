@@ -16,20 +16,27 @@ from rwu_llmconnector.llmconnector import (
     default_logger,
     get_print_logger,
 )
-from rwu_llmconnector.lmstudio_client import LMStudioClient, StatefulLMStudioClient
+from rwu_llmconnector.lmstudio_client import (
+    LOCAL_HISTORY_CONTEXT,
+    LMStudioClient,
+    SERVER_STATE_CONTEXT,
+    StatefulLMStudioClient,
+)
 from rwu_llmconnector.ollama_client import OllamaClient
 from rwu_llmconnector.openai_client import OpenAIClient
 
 __all__ = [
     "GeminiClient",
     "LLMCClient",
+    "LOCAL_HISTORY_CONTEXT",
     "LMStudioClient",
     "OllamaClient",
     "OpenAIClient",
+    "SERVER_STATE_CONTEXT",
     "StatefulLMStudioClient",
     "DEFAULT_LOGGER_NAME",
     "default_logger",
     "get_print_logger",
 ]
 
-__version__ = "0.1.0"
+__version__ = "0.1.1"

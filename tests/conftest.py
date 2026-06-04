@@ -8,6 +8,7 @@ import os
 from pathlib import Path
 
 import pytest
+import requests
 from dotenv import load_dotenv
 
 load_dotenv(Path(__file__).resolve().parents[1] / ".env")
@@ -55,7 +56,20 @@ requires_ollama = pytest.mark.skipif(
     not os.getenv("OLLAMA_MODEL"),
     reason="OLLAMA_MODEL not set",
 )
+
+
+def lmstudio_server_reachable(base_url=None):
+    """Return True if LM Studio responds on the v1 models endpoint."""
+    url = (base_url or os.getenv("LMSTUDIO_BASE_URL", "http://localhost:1234")).rstrip("/")
+    try:
+        response = requests.get(f"{url}/api/v1/models", timeout=3)
+        return response.status_code < 500
+    except requests.RequestException:
+        return False
+
+
 requires_lmstudio = pytest.mark.skipif(
-    not os.getenv("LMSTUDIO_BASE_URL") or not os.getenv("LMSTUDIO_MODEL"),
-    reason="LMSTUDIO_BASE_URL and LMSTUDIO_MODEL must be set",
+    not os.getenv("LMSTUDIO_MODEL")
+    or not lmstudio_server_reachable(),
+    reason="LM Studio not reachable (start server) or LMSTUDIO_MODEL not set",
 )
