@@ -132,6 +132,24 @@ def test_integration_to_lmstudio_integration_hook():
     assert payload["integrations"] == [{"type": "mcp", "server": "demo"}]
 
 
+def test_per_request_integrations_override_client_integrations():
+    client = LMStudioClient(
+        model="test",
+        integrations=[{"type": "plugin", "id": "mcp/huggingface"}],
+    )
+    per_request = [{"type": "ephemeral_mcp", "server_url": "https://example.com/mcp"}]
+    payload = client._build_payload(
+        user_message="hi",
+        system_message=None,
+        ignore_history=True,
+        temperature=0,
+        model=None,
+        context_length=8000,
+        integrations=per_request,
+    )
+    assert payload["integrations"] == per_request
+
+
 @patch("rwu_llmconnector.lmstudio_client.requests.post")
 def test_call_client_parses_output_list(mock_post):
     mock_post.return_value = MagicMock(

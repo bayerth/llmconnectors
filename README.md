@@ -25,6 +25,20 @@ pip install rwu-llmconnector
 
 ## Quick start
 
+All provider clients inherit from `LLMClient` and share `send_request()`:
+
+```python
+response, prompt_tokens, completion_tokens, reasoning_tokens, runtime = llm.send_request(
+    user_message,
+    system_message=None,
+    ignore_history=False,
+    temperature=None,
+    model=None,
+    tools=None,          # OpenAI-compatible tool definitions
+    integrations=None,   # LM Studio MCP / integration specs (per request)
+)
+```
+
 ### OpenAI
 
 ```python
@@ -40,6 +54,31 @@ response, prompt_tokens, completion_tokens, reasoning_tokens, runtime = llm.send
 )
 print(response)
 ```
+
+### OpenRouter
+
+[OpenRouter](https://openrouter.ai/) is an OpenAI-compatible API — use the same `OpenAIClient` with a custom `base_url`:
+
+```python
+import os
+
+from openai import OpenAI
+from rwu_llmconnector import OpenAIClient
+
+client = OpenAI(
+    base_url="https://openrouter.ai/api/v1/",
+    api_key=os.environ["OPEN_ROUTER_API_KEY"],
+)
+llm = OpenAIClient(client, model="gpt-4o-mini")
+
+response, prompt_tokens, completion_tokens, reasoning_tokens, runtime = llm.send_request(
+    "What is PyPI?",
+    system_message="you are a helpful assistant",
+)
+print(response)
+```
+
+Set `OPEN_ROUTER_API_KEY` in your environment (API key from [openrouter.ai/keys](https://openrouter.ai/keys)).
 
 ### Google Gemini
 
@@ -96,7 +135,7 @@ For server-side context (`store=True`, `previous_response_id` chain), use `State
 
 #### MCP / tool integrations
 
-Pass integration specs in the constructor, or add them later with `add_integration()`. Each entry is either a dict (LM Studio integration JSON) or an object with `to_lmstudio_integration()`.
+Pass integration specs in the constructor, per request via `send_request(integrations=...)`, or add them later with `add_integration()`. Each entry is either a dict (LM Studio integration JSON) or an object with `to_lmstudio_integration()`. Per-request `integrations` override the client-level list for that call only.
 
 **Hugging Face MCP** (same pattern as the live test in `tests/test_lmstudio_client.py`):
 
@@ -184,6 +223,7 @@ Tests load variables from `.env` via `python-dotenv`. See `.env.example` for sup
 | Variable | Used for |
 |----------|----------|
 | `OPENAI_API_KEY` | OpenAI |
+| `OPEN_ROUTER_API_KEY` | OpenRouter (OpenAI-compatible) |
 | `GEMINI_API_KEY` or `GOOGLE_API_KEY` | Gemini |
 | `LMSTUDIO_BASE_URL`, `LMSTUDIO_MODEL` | LM Studio live tests (defaults: `http://localhost:1234`, `qwen/qwen3-4b-2507`) |
 | `LMSTUDIO_API_KEY` or `MAC_STUDIO_API_KEY` | LM Studio auth (optional locally) |
@@ -209,10 +249,10 @@ Build and upload (requires [PyPI account](https://pypi.org/account/register/) an
 
 ```bash
 uv build
-uv publish
+uv publish --token pypi-AgEIcHlwaS...
 ```
 
-Upload only the files in `dist/`; do not add `dist/` to git.
+Or set `UV_PUBLISH_TOKEN` in the environment and run `uv publish`. Upload only the files in `dist/`; do not add `dist/` to git.
 
 After creating the GitHub repository, uncomment and set `Repository` under `[project.urls]` in `pyproject.toml`.
 

@@ -5,7 +5,7 @@ import time
 
 import requests
 
-from rwu_llmconnector.llmconnector import LLMCClient
+from rwu_llmconnector.llmconnector import LLMClient
 
 DEFAULT_LMSTUDIO_BASE_URL = os.getenv("LMSTUDIO_BASE_URL", "http://localhost:1234")
 DEFAULT_LMSTUDIO_API_KEY = os.getenv("LMSTUDIO_API_KEY") or os.getenv(
@@ -15,7 +15,7 @@ LOCAL_HISTORY_CONTEXT = "local_history"
 SERVER_STATE_CONTEXT = "server_state"
 
 
-class LMStudioClient(LLMCClient):
+class LMStudioClient(LLMClient):
     """LM Studio client with optional MCP integrations and explicit context modes.
 
     Context handling:
@@ -78,6 +78,8 @@ class LMStudioClient(LLMCClient):
         temperature=0,
         model=None,
         write_to_file=False,
+        tools=None,
+        integrations=None,
         **kwargs,
     ):
         if self.uses_server_state and ignore_history:
@@ -90,6 +92,8 @@ class LMStudioClient(LLMCClient):
             temperature=temperature,
             model=model,
             context_length=kwargs.get("context_length", 8000),
+            tools=tools,
+            integrations=integrations,
         )
         headers = self._build_headers()
 
@@ -144,16 +148,21 @@ class LMStudioClient(LLMCClient):
         temperature,
         model,
         context_length,
+        tools=None,
+        integrations=None,
     ):
         payload = {
             "model": model if model is not None else self.model,
             "input": self._build_input(user_message, ignore_history),
             "system_prompt": self._resolve_system_prompt(system_message),
-            "integrations": self._resolve_integrations(),
+            "integrations": self._resolve_integrations(integrations),
             "context_length": context_length,
             "temperature": temperature,
             "store": self.uses_server_state,
         }
+
+        if tools is not None:
+            payload["tools"] = tools
 
         if self.uses_server_state and self.last_response_id:
             payload["previous_response_id"] = self.last_response_id
@@ -183,12 +192,13 @@ class LMStudioClient(LLMCClient):
         self.logger.debug(f"System prompt: {system_prompt}")
         return system_prompt
 
-    def _resolve_integrations(self):
+    def _resolve_integrations(self, integrations=None):
+        source = self.integrations if integrations is None else integrations
         return [
             integration.to_lmstudio_integration()
             if hasattr(integration, "to_lmstudio_integration")
             else integration
-            for integration in self.integrations
+            for integration in source
         ]
 
     def _build_headers(self):

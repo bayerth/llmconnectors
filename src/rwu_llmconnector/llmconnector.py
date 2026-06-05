@@ -1,6 +1,6 @@
 """Base client, logging helpers, and shared request orchestration.
 
-All provider clients inherit from :class:`LLMCClient` and implement :meth:`LLMCClient.call_client`.
+All provider clients inherit from :class:`LLMClient` and implement :meth:`LLMClient.call_client`.
 Use :func:`send_request` for the full flow (logging, metrics, optional file export).
 """
 
@@ -80,7 +80,7 @@ def append_to_json_file(message, filename=None):
             path.write_text(json.dumps(data, indent=4), encoding="utf-8")
 
 
-class LLMCClient(ABC):
+class LLMClient(ABC):
     """Abstract base for provider-specific LLM clients with shared history and metrics.
 
     Attributes:
@@ -192,6 +192,8 @@ class LLMCClient(ABC):
         model=None,
         write_to_file=False,
         append=False,
+        tools=None,
+        integrations=None,
         **kwargs,
     ):
         """Send a chat request, update metrics/history, and optionally save to disk.
@@ -204,6 +206,8 @@ class LLMCClient(ABC):
             model: Override instance default model.
             write_to_file: Save history after a successful call.
             append: Passed through to :meth:`write_json`.
+            tools: Optional tool definitions for this request (provider-specific).
+            integrations: Optional integration specs for this request (e.g. LM Studio MCP).
             **kwargs: Forwarded to :meth:`call_client`.
 
         Returns:
@@ -224,6 +228,8 @@ class LLMCClient(ABC):
                 temperature=temperature,
                 model=model,
                 write_to_file=write_to_file,
+                tools=tools,
+                integrations=integrations,
                 **kwargs,
             )
         )
@@ -261,6 +267,8 @@ class LLMCClient(ABC):
         model=None,
         write_to_file=False,
         append=False,
+        tools=None,
+        integrations=None,
         **kwargs,
     ):
         """Like :meth:`send_request` but returns only performance summary.
@@ -278,6 +286,8 @@ class LLMCClient(ABC):
                 model=model,
                 write_to_file=write_to_file,
                 append=append,
+                tools=tools,
+                integrations=integrations,
                 **kwargs,
             )
         )
@@ -292,13 +302,19 @@ class LLMCClient(ABC):
         self,
         user_message,
         system_message=None,
-        history=None,
+        ignore_history=False,
         temperature=0,
         write_to_file=False,
         model=None,
+        tools=None,
+        integrations=None,
         **kwargs,
     ):
         """Execute one provider request (implemented by subclasses).
+
+        Args:
+            tools: Optional tool definitions for this request (provider-specific).
+            integrations: Optional integration specs for this request (e.g. LM Studio MCP).
 
         Returns:
             (response_text, prompt_tokens, completion_tokens, reasoning_tokens, runtime)

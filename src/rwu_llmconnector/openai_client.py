@@ -1,10 +1,10 @@
 """OpenAI Chat Completions client."""
 
 import time
-from rwu_llmconnector.llmconnector import LLMCClient
+from rwu_llmconnector.llmconnector import LLMClient
 
 
-class OpenAIClient(LLMCClient):
+class OpenAIClient(LLMClient):
     """Client for the OpenAI Chat Completions API (or compatible endpoints).
 
     Expects ``client`` to be an :class:`openai.OpenAI` instance with
@@ -19,6 +19,8 @@ class OpenAIClient(LLMCClient):
         temperature=0,
         model=None,
         write_to_file=False,
+        tools=None,
+        integrations=None,
         **kwargs,
     ):
         """Build a message list, call the API, and append the assistant reply to history.
@@ -36,9 +38,15 @@ class OpenAIClient(LLMCClient):
         try:
             model = self.model if model is None else model
             start = time.time()
-            response = self.client.chat.completions.create(
-                temperature=temperature, messages=message, model=model, seed=42
-            )
+            request_kwargs = {
+                "temperature": temperature,
+                "messages": message,
+                "model": model,
+                "seed": 42,
+            }
+            if tools is not None:
+                request_kwargs["tools"] = tools
+            response = self.client.chat.completions.create(**request_kwargs)
             end = time.time()
             runtime = end - start
             self.logger.debug(f"GPT Request took {runtime} seconds")

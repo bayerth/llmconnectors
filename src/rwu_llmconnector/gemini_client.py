@@ -2,10 +2,10 @@
 
 import time
 from google.genai import types
-from rwu_llmconnector.llmconnector import LLMCClient, default_logger
+from rwu_llmconnector.llmconnector import LLMClient, default_logger
 
 
-class GeminiClient(LLMCClient):
+class GeminiClient(LLMClient):
     """Google Gemini client using a structured XML prompt template.
 
     Conversation history is folded into the template ``task`` field rather than
@@ -79,6 +79,8 @@ class GeminiClient(LLMCClient):
         retrieved_information=None,
         write_to_file=False,
         constraints=None,
+        tools=None,
+        integrations=None,
         **kwargs,
     ):
         """Format the XML prompt, call Gemini, and update history.

@@ -2,10 +2,10 @@
 
 import time
 from ollama import Client
-from rwu_llmconnector.llmconnector import LLMCClient, default_logger
+from rwu_llmconnector.llmconnector import LLMClient, default_logger
 
 
-class OllamaClient(LLMCClient):
+class OllamaClient(LLMClient):
     """Client for an Ollama server via the official ``ollama`` Python library."""
 
     def __init__(
@@ -37,6 +37,8 @@ class OllamaClient(LLMCClient):
         retrieved_information=None,
         model=None,
         write_to_file=False,
+        tools=None,
+        integrations=None,
         **kwargs,
     ):
         """Call ``client.chat`` with OpenAI-style roles.
