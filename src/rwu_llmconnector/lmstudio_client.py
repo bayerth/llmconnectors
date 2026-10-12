@@ -30,13 +30,21 @@ class LMStudioClient(LLMClient):
         api_key=DEFAULT_LMSTUDIO_API_KEY,
         integrations=None,
         context_mode=LOCAL_HISTORY_CONTEXT,
+        context_length=None,
+        max_output_tokens=None,
         **kwargs,
     ):
-        super().__init__(client=None, model=model, **kwargs)
+        super().__init__(
+            client=None,
+            model=model,
+            max_output_tokens=max_output_tokens,
+            **kwargs,
+        )
         self.base_url = base_url.rstrip("/") + "/api/v1/chat"
         self.api_key = api_key
         self.logger.debug(f"URL: {self.base_url}")
         self.context_mode = context_mode
+        self.context_length = context_length
         self.integrations = list(integrations) if integrations is not None else []
         self.last_response_id = None
         self._validate_context_mode()
@@ -70,6 +78,37 @@ class LMStudioClient(LLMClient):
         super().clear_history(reset_counters)
         self.last_response_id = None
 
+    def call_client_with_tools(
+        self,
+        user_message,
+        tools,
+        system_message=None,
+        ignore_history=False,
+        temperature=0,
+        model=None,
+        write_to_file=False,
+        tool_mapping=None,
+        integrations=None,
+        slim_history=False,
+        context_length=None,
+        max_output_tokens=None,
+        **kwargs,
+    ):
+        """LM Studio native tools/MCP via payload; no OpenAI-style tool_mapping loop."""
+        return self.call_client(
+            user_message,
+            system_message=system_message,
+            ignore_history=ignore_history,
+            temperature=temperature,
+            model=model,
+            write_to_file=write_to_file,
+            tools=tools,
+            integrations=integrations,
+            context_length=context_length,
+            max_output_tokens=max_output_tokens,
+            **kwargs,
+        )
+
     def call_client(
         self,
         user_message,
@@ -78,8 +117,10 @@ class LMStudioClient(LLMClient):
         temperature=0,
         model=None,
         write_to_file=False,
-        tools=None,
         integrations=None,
+        tools=None,
+        context_length=None,
+        max_output_tokens=None,
         **kwargs,
     ):
         if self.uses_server_state and ignore_history:
@@ -91,7 +132,8 @@ class LMStudioClient(LLMClient):
             ignore_history=ignore_history,
             temperature=temperature,
             model=model,
-            context_length=kwargs.get("context_length", 8000),
+            context_length=self._resolve_context_length(context_length, **kwargs),
+            max_output_tokens=self._resolve_max_output_tokens(max_output_tokens, **kwargs),
             tools=tools,
             integrations=integrations,
         )
@@ -109,8 +151,8 @@ class LMStudioClient(LLMClient):
             data = response.json()
             runtime = time.time() - start
             self.logger.debug(f"LM Studio Request took {runtime} seconds")
-        except Exception as e:
-            self.logger.error(f"LM Studio API call failed: {e}")
+        except requests.RequestException as e:
+            self._log_request_error(e)
             return None, 0, 0, 0, 0
 
         if self.uses_server_state:
@@ -147,7 +189,8 @@ class LMStudioClient(LLMClient):
         ignore_history,
         temperature,
         model,
-        context_length,
+        context_length=None,
+        max_output_tokens=None,
         tools=None,
         integrations=None,
     ):
@@ -156,11 +199,14 @@ class LMStudioClient(LLMClient):
             "input": self._build_input(user_message, ignore_history),
             "system_prompt": self._resolve_system_prompt(system_message),
             "integrations": self._resolve_integrations(integrations),
-            "context_length": context_length,
             "temperature": temperature,
             "store": self.uses_server_state,
         }
 
+        if context_length is not None:
+            payload["context_length"] = context_length
+        if max_output_tokens is not None:
+            payload["max_output_tokens"] = max_output_tokens
         if tools is not None:
             payload["tools"] = tools
 
@@ -168,6 +214,49 @@ class LMStudioClient(LLMClient):
             payload["previous_response_id"] = self.last_response_id
 
         return payload
+
+    def _resolve_context_length(self, context_length=None, **kwargs):
+        """Resolve per-request context length without mutating ``self.context_length``."""
+        if context_length is not None:
+            return context_length
+        kw_context_length = kwargs.get("context_length")
+        if kw_context_length is not None:
+            return kw_context_length
+        return self.context_length
+
+    def _log_request_error(self, error):
+        message = str(error)
+        response = getattr(error, "response", None)
+        if response is not None:
+            message = f"{message}; response body: {response.text}"
+        self.logger.error(f"LM Studio API call failed: {message}")
+
+    def list_models(self):
+        """Return model ids from ``GET /api/v1/models``."""
+        models_url = self.base_url.replace("/api/v1/chat", "/api/v1/models")
+        try:
+            response = requests.get(
+                models_url, headers=self._build_headers(), timeout=60
+            )
+            response.raise_for_status()
+            data = response.json()
+        except requests.RequestException as e:
+            self._log_request_error(e)
+            return []
+
+        entries = data.get("data") if isinstance(data, dict) else data
+        if not isinstance(entries, list):
+            return []
+
+        names = []
+        for item in entries:
+            if isinstance(item, str):
+                names.append(item)
+            elif isinstance(item, dict):
+                name = item.get("id") or item.get("name") or item.get("model")
+                if name:
+                    names.append(name)
+        return names
 
     def _build_input(self, user_message, ignore_history):
         if self.uses_server_state:
@@ -261,6 +350,8 @@ class StatefulLMStudioClient(LMStudioClient):
         base_url=DEFAULT_LMSTUDIO_BASE_URL,
         api_key=DEFAULT_LMSTUDIO_API_KEY,
         integrations=None,
+        context_length=None,
+        max_output_tokens=None,
         **kwargs,
     ):
         kwargs["context_mode"] = SERVER_STATE_CONTEXT
@@ -269,5 +360,7 @@ class StatefulLMStudioClient(LMStudioClient):
             base_url=base_url,
             api_key=api_key,
             integrations=integrations,
+            context_length=context_length,
+            max_output_tokens=max_output_tokens,
             **kwargs,
         )

@@ -13,6 +13,7 @@ from rwu_llmconnector.gemini_client import GeminiClient
 from rwu_llmconnector.llmconnector import (
     DEFAULT_LOGGER_NAME,
     LLMClient,
+    call_requested_tools,
     default_logger,
     get_print_logger,
 )
@@ -28,6 +29,7 @@ from rwu_llmconnector.openai_client import OpenAIClient
 __all__ = [
     "GeminiClient",
     "LLMClient",
+    "call_requested_tools",
     "LOCAL_HISTORY_CONTEXT",
     "LMStudioClient",
     "OllamaClient",
@@ -39,4 +41,4 @@ __all__ = [
     "get_print_logger",
 ]
 
-__version__ = "0.1.2"
+__version__ = "0.2.0"

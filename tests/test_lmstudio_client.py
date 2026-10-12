@@ -4,6 +4,7 @@ import os
 from unittest.mock import MagicMock, patch
 
 import pytest
+import requests
 
 from rwu_llmconnector.lmstudio_client import (
     LOCAL_HISTORY_CONTEXT,
@@ -68,8 +69,8 @@ def test_local_history_builds_list_input():
         ignore_history=False,
         temperature=0,
         model=None,
-        context_length=8000,
     )
+    assert "context_length" not in payload
     assert payload["store"] is False
     assert payload["input"] == [
         {"type": "text", "content": "prior"},
@@ -90,7 +91,6 @@ def test_server_state_builds_string_input_and_store_true():
         ignore_history=False,
         temperature=0,
         model=None,
-        context_length=8000,
     )
     assert payload["store"] is True
     assert payload["input"] == "hello"
@@ -109,7 +109,6 @@ def test_server_state_chains_previous_response_id():
         ignore_history=False,
         temperature=0,
         model=None,
-        context_length=8000,
     )
     assert payload["previous_response_id"] == "resp-123"
 
@@ -127,7 +126,6 @@ def test_integration_to_lmstudio_integration_hook():
         ignore_history=True,
         temperature=0,
         model=None,
-        context_length=8000,
     )
     assert payload["integrations"] == [{"type": "mcp", "server": "demo"}]
 
@@ -144,10 +142,146 @@ def test_per_request_integrations_override_client_integrations():
         ignore_history=True,
         temperature=0,
         model=None,
-        context_length=8000,
         integrations=per_request,
     )
     assert payload["integrations"] == per_request
+
+
+@patch("rwu_llmconnector.lmstudio_client.requests.post")
+def test_constructor_context_length_used_when_call_omits_it(mock_post):
+    mock_post.return_value = MagicMock(
+        status_code=200,
+        json=lambda: {
+            "output": [{"type": "message", "content": "ok"}],
+            "stats": {"input_tokens": 1, "total_output_tokens": 1, "reasoning_output_tokens": 0},
+        },
+    )
+    mock_post.return_value.raise_for_status = MagicMock()
+
+    client = LMStudioClient(
+        model="test", base_url="http://localhost:1234", api_key=None, context_length=8192
+    )
+    client.call_client("hi", ignore_history=True)
+
+    assert client.context_length == 8192
+    assert mock_post.call_args.kwargs["json"]["context_length"] == 8192
+
+
+@patch("rwu_llmconnector.lmstudio_client.requests.post")
+def test_call_context_length_overrides_payload_without_mutating_instance(mock_post):
+    mock_post.return_value = MagicMock(
+        status_code=200,
+        json=lambda: {
+            "output": [{"type": "message", "content": "ok"}],
+            "stats": {"input_tokens": 1, "total_output_tokens": 1, "reasoning_output_tokens": 0},
+        },
+    )
+    mock_post.return_value.raise_for_status = MagicMock()
+
+    client = LMStudioClient(
+        model="test", base_url="http://localhost:1234", api_key=None, context_length=8192
+    )
+    client.call_client("hi", ignore_history=True, context_length=4096)
+
+    assert client.context_length == 8192
+    assert mock_post.call_args.kwargs["json"]["context_length"] == 4096
+
+
+@patch("rwu_llmconnector.lmstudio_client.requests.post")
+def test_call_client_with_tools_forwards_context_length(mock_post):
+    mock_post.return_value = MagicMock(
+        status_code=200,
+        json=lambda: {
+            "output": [{"type": "message", "content": "ok"}],
+            "stats": {"input_tokens": 1, "total_output_tokens": 1, "reasoning_output_tokens": 0},
+        },
+    )
+    mock_post.return_value.raise_for_status = MagicMock()
+
+    client = LMStudioClient(model="test", base_url="http://localhost:1234", api_key=None)
+    client.call_client_with_tools(
+        "hi",
+        tools=[{"type": "function", "function": {"name": "demo"}}],
+        ignore_history=True,
+        context_length=8192,
+    )
+
+    assert mock_post.call_args.kwargs["json"]["context_length"] == 8192
+
+
+def test_build_payload_includes_optional_limits_when_set():
+    client = LMStudioClient(model="test")
+    payload = client._build_payload(
+        user_message="hi",
+        system_message=None,
+        ignore_history=True,
+        temperature=0,
+        model=None,
+        context_length=8192,
+        max_output_tokens=512,
+    )
+    assert payload["context_length"] == 8192
+    assert payload["max_output_tokens"] == 512
+
+
+@patch("rwu_llmconnector.lmstudio_client.requests.post")
+def test_constructor_max_output_tokens_used_when_call_omits_it(mock_post):
+    mock_post.return_value = MagicMock(
+        status_code=200,
+        json=lambda: {
+            "output": [{"type": "message", "content": "ok"}],
+            "stats": {"input_tokens": 1, "total_output_tokens": 1, "reasoning_output_tokens": 0},
+        },
+    )
+    mock_post.return_value.raise_for_status = MagicMock()
+
+    client = LMStudioClient(
+        model="test",
+        base_url="http://localhost:1234",
+        api_key=None,
+        max_output_tokens=512,
+    )
+    client.call_client("hi", ignore_history=True)
+
+    assert client.max_output_tokens == 512
+    assert mock_post.call_args.kwargs["json"]["max_output_tokens"] == 512
+
+
+@patch("rwu_llmconnector.lmstudio_client.requests.post")
+def test_call_client_maps_max_tokens_to_max_output_tokens(mock_post):
+    mock_post.return_value = MagicMock(
+        status_code=200,
+        json=lambda: {
+            "output": [{"type": "message", "content": "ok"}],
+            "stats": {"input_tokens": 1, "total_output_tokens": 1, "reasoning_output_tokens": 0},
+        },
+    )
+    mock_post.return_value.raise_for_status = MagicMock()
+
+    client = LMStudioClient(model="test", base_url="http://localhost:1234", api_key=None)
+    client.call_client("hi", ignore_history=True, max_tokens=256)
+
+    payload = mock_post.call_args.kwargs["json"]
+    assert "context_length" not in payload
+    assert payload["max_output_tokens"] == 256
+
+
+@patch("rwu_llmconnector.lmstudio_client.requests.post")
+def test_call_client_logs_http_error_response_body(mock_post):
+    error_response = MagicMock(status_code=500, text='{"error":"out of memory"}')
+    mock_post.return_value = error_response
+    mock_post.return_value.raise_for_status.side_effect = requests.HTTPError(
+        "500 Server Error", response=error_response
+    )
+
+    client = LMStudioClient(model="test", base_url="http://localhost:1234", api_key=None)
+    client.logger = MagicMock()
+
+    result = client.call_client("hi", ignore_history=True)
+
+    assert result[0] is None
+    client.logger.error.assert_called_once()
+    assert "out of memory" in client.logger.error.call_args.args[0]
 
 
 @patch("rwu_llmconnector.lmstudio_client.requests.post")

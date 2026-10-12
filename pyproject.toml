@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "rwu-llmconnector"
-version = "0.1.2"
+version = "0.2.0"
 description = "Unified LLM connectors for OpenAI, Google Gemini, Ollama, and LM Studio."
 readme = "README.md"
 license = "MIT"

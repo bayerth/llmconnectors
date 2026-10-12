@@ -70,6 +70,26 @@ class GeminiClient(LLMClient):
             {"role": "system", "content": system_message + "\n" + constraints}
         )
 
+    def list_models(self):
+        raise NotImplementedError(f"{type(self).__name__} does not support listing models yet.")
+
+    def call_client_with_tools(
+        self,
+        user_message,
+        tools,
+        system_message=None,
+        ignore_history=False,
+        temperature=0,
+        model=None,
+        write_to_file=False,
+        tool_mapping=None,
+        integrations=None,
+        slim_history=False,
+        max_output_tokens=None,
+        **kwargs,
+    ):
+        raise NotImplementedError(f"{type(self).__name__} does not support tool calling.")
+
     def call_client(
         self,
         user_message,
@@ -79,8 +99,8 @@ class GeminiClient(LLMClient):
         retrieved_information=None,
         write_to_file=False,
         constraints=None,
-        tools=None,
         integrations=None,
+        max_output_tokens=None,
         **kwargs,
     ):
         """Format the XML prompt, call Gemini, and update history.
