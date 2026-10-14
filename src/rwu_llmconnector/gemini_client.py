@@ -86,6 +86,7 @@ class GeminiClient(LLMClient):
         integrations=None,
         slim_history=False,
         max_output_tokens=None,
+        logger=None,
         **kwargs,
     ):
         raise NotImplementedError(f"{type(self).__name__} does not support tool calling.")
@@ -101,6 +102,7 @@ class GeminiClient(LLMClient):
         constraints=None,
         integrations=None,
         max_output_tokens=None,
+        logger=None,
         **kwargs,
     ):
         """Format the XML prompt, call Gemini, and update history.
@@ -114,6 +116,7 @@ class GeminiClient(LLMClient):
         Note:
             The API model id is currently fixed to ``gemini-2.5-flash-lite`` in the request.
         """
+        log = self._resolve_logger(logger)
         system_instruction = "" if system_message is None else system_message
         history = (
             ""
@@ -122,7 +125,7 @@ class GeminiClient(LLMClient):
                 [f"{msg['role']}: {msg['content']}" for msg in self.history[1:-1]]
             )
         )
-        self.logger.debug(f"history: {history}")
+        log.debug(f"history: {history}")
         msg = self.prompt_template.format(
             role=self.system_message,
             constraints=self.constraints if constraints is None else constraints,
@@ -137,7 +140,7 @@ class GeminiClient(LLMClient):
         end = time.time()
         runtime = end - start
         message = response.text
-        self.logger.debug(f"history: {message}")
+        log.debug(f"history: {message}")
         user_history = "" if constraints is None else constraints
         user_history += (
             "\n" + str(retrieved_information)

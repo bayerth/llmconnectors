@@ -40,10 +40,10 @@ DEFAULT_LOGGER_NAME = "rwu_llmconnector"
 
 
 def get_print_logger(
-        name=DEFAULT_LOGGER_NAME,
-        msg_producer=default_log,
-        level=logging.DEBUG,
-        ):
+    name=DEFAULT_LOGGER_NAME,
+    msg_producer=default_log,
+    level=logging.DEBUG,
+):
     """Return a logger that forwards formatted records to ``msg_producer`` instead of stderr."""
     logger = logging.getLogger(name)
     logger.setLevel(level)
@@ -54,9 +54,9 @@ def get_print_logger(
     handler = FunctionHandler(msg_producer)
 
     formatter = logging.Formatter(
-            fmt="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-            datefmt="%Y-%m-%d %H:%M:%S",
-            )
+        fmt="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
+    )
     handler.setFormatter(formatter)
     logger.addHandler(handler)
 
@@ -102,9 +102,9 @@ def message_to_dict(message):
         return message_dict
 
     result = {
-            "role": getattr(message, "role", "assistant"),
-            "content": getattr(message, "content", None),
-            }
+        "role": getattr(message, "role", "assistant"),
+        "content": getattr(message, "content", None),
+    }
     tool_calls = getattr(message, "tool_calls", None)
     if tool_calls:
         result["tool_calls"] = [model_to_dict(tool_call) for tool_call in tool_calls]
@@ -179,7 +179,9 @@ def call_requested_tools(message, tool_mapping, logger=None):
     messages = []
     tool_calls = _extract_tool_calls(message)
     total_start = time.time()
-    _log_via_logger(logger, "debug", f"Processing {len(tool_calls)} requested tool call(s).")
+    _log_via_logger(
+        logger, "debug", f"Processing {len(tool_calls)} requested tool call(s)."
+    )
     try:
         for index, tool_call in enumerate(tool_calls, start=1):
             tool_name = _tool_call_name(tool_call)
@@ -191,37 +193,37 @@ def call_requested_tools(message, tool_mapping, logger=None):
             tool_start = time.time()
             call_ref = tool_call_id or tool_name
             _log_via_logger(
-                    logger,
-                    "debug",
-                    f"Calling tool {index}/{len(tool_calls)}: {tool_name} "
-                    f"(ref={call_ref}, args={tool_args})",
-                    )
+                logger,
+                "debug",
+                f"Calling tool {index}/{len(tool_calls)}: {tool_name} "
+                f"(ref={call_ref}, args={tool_args})",
+            )
             try:
                 tool_response = tool_mapping[tool_name](**tool_args)
             except Exception as e:
                 tool_runtime = time.time() - tool_start
                 _log_via_logger(
-                        logger,
-                        "error",
-                        f"Tool call failed after {tool_runtime:.3f}s: {tool_name} "
-                        f"(ref={call_ref}): {e}",
-                        )
+                    logger,
+                    "error",
+                    f"Tool call failed after {tool_runtime:.3f}s: {tool_name} "
+                    f"(ref={call_ref}): {e}",
+                )
                 raise
             tool_runtime = time.time() - tool_start
             _log_via_logger(
-                    logger,
-                    "debug",
-                    f"Tool call completed in {tool_runtime:.3f}s: {tool_name} "
-                    f"(ref={call_ref}, response={tool_response})",
-                    )
+                logger,
+                "debug",
+                f"Tool call completed in {tool_runtime:.3f}s: {tool_name} "
+                f"(ref={call_ref}, response={tool_response})",
+            )
             messages.append(_format_tool_result_message(tool_call, tool_response))
     finally:
         total_runtime = time.time() - total_start
         _log_via_logger(
-                logger,
-                "debug",
-                f"Processed {len(messages)}/{len(tool_calls)} tool call(s) in {total_runtime:.2f}s.",
-                )
+            logger,
+            "debug",
+            f"Processed {len(messages)}/{len(tool_calls)} tool call(s) in {total_runtime:.2f}s.",
+        )
     return messages
 
 
@@ -248,17 +250,17 @@ class LLMClient(ABC):
     """
 
     def __init__(
-            self,
-            client,
-            model,
-            system_messgage="You are a helpful assistant.",
-            filename=None,
-            write_to_file=False,
-            append=False,
-            temperature=0,
-            max_output_tokens=None,
-            logger=default_logger,
-            ):
+        self,
+        client,
+        model,
+        system_messgage="You are a helpful assistant.",
+        filename=None,
+        write_to_file=False,
+        append=False,
+        temperature=0,
+        max_output_tokens=None,
+        logger=default_logger,
+    ):
         """Initialize shared state.
 
         Args:
@@ -278,7 +280,7 @@ class LLMClient(ABC):
         self.temperature = temperature
         self.max_output_tokens = max_output_tokens
         self.logger = (
-                logger if logger is not None else get_print_logger(name=DEFAULT_LOGGER_NAME)
+            logger if logger is not None else get_print_logger(name=DEFAULT_LOGGER_NAME)
         )
         self.total_prompt_tokens = 0
         self.total_completion_tokens = 0
@@ -352,19 +354,24 @@ class LLMClient(ABC):
             **kwargs,
         )
 
+    def _resolve_logger(self, logger=None):
+        """Use per-call ``logger`` when set, otherwise :attr:`logger`."""
+        return logger if logger is not None else self.logger
+
     def send_request(
-            self,
-            user_message,
-            system_message=None,
-            ignore_history=False,
-            temperature=None,
-            model=None,
-            write_to_file=False,
-            append=False,
-            tools=None,
-            integrations=None,
-            **kwargs,
-            ):
+        self,
+        user_message,
+        system_message=None,
+        ignore_history=False,
+        temperature=None,
+        model=None,
+        write_to_file=False,
+        append=False,
+        tools=None,
+        integrations=None,
+        logger=None,
+        **kwargs,
+    ):
         """Send a chat request, update metrics/history, and optionally save to disk.
 
         Args:
@@ -377,6 +384,7 @@ class LLMClient(ABC):
             append: Passed through to :meth:`write_json`.
             tools: Optional tool definitions for this request (provider-specific).
             integrations: Optional integration specs for this request (e.g. LM Studio MCP).
+            logger: Optional logger for this request; defaults to the client instance logger.
             **kwargs: Forwarded to :meth:`call_client` or :meth:`call_client_with_tools`.
                 Accepts ``max_output_tokens`` or alias ``max_tokens`` (generation cap).
 
@@ -385,10 +393,11 @@ class LLMClient(ABC):
         """
         model = model if model is not None else self.model
         temperature = temperature if temperature is not None else self.temperature
-        default_logger.info(
-                f"-- GPT Request started. Used model: {model}, temperature: {temperature} --"
-                )
-        self.logger.debug(f"Prompt: {user_message}")
+        logger = self._resolve_logger(logger)
+        logger.info(
+            f"-- GPT Request started. Used model: {model}, temperature: {temperature} --"
+        )
+        logger.debug(f"Prompt: {user_message}")
         start = time.time()
         request_kwargs = dict(kwargs)
         tool_mapping = request_kwargs.pop("tool_mapping", None)
@@ -397,35 +406,45 @@ class LLMClient(ABC):
         if max_output_tokens is None:
             max_output_tokens = request_kwargs.pop("max_tokens", None)
         if tools is not None:
-            response_msg, prompt_tokens, completion_tokens, reasoning_tokens, runtime = (
-                    self.call_client_with_tools(
-                            user_message,
-                            tools,
-                            system_message=system_message,
-                            ignore_history=ignore_history,
-                            temperature=temperature,
-                            model=model,
-                            write_to_file=write_to_file,
-                            tool_mapping=tool_mapping,
-                            integrations=integrations,
-                            slim_history=slim_history,
-                            max_output_tokens=max_output_tokens,
-                            **request_kwargs,
-                            )
+            (
+                response_msg,
+                prompt_tokens,
+                completion_tokens,
+                reasoning_tokens,
+                runtime,
+            ) = self.call_client_with_tools(
+                user_message,
+                tools,
+                system_message=system_message,
+                ignore_history=ignore_history,
+                temperature=temperature,
+                model=model,
+                write_to_file=write_to_file,
+                tool_mapping=tool_mapping,
+                integrations=integrations,
+                slim_history=slim_history,
+                max_output_tokens=max_output_tokens,
+                logger=logger,
+                **request_kwargs,
             )
         else:
-            response_msg, prompt_tokens, completion_tokens, reasoning_tokens, runtime = (
-                    self.call_client(
-                            user_message,
-                            system_message=system_message,
-                            ignore_history=ignore_history,
-                            temperature=temperature,
-                            model=model,
-                            write_to_file=write_to_file,
-                            integrations=integrations,
-                            max_output_tokens=max_output_tokens,
-                            **request_kwargs,
-                            )
+            (
+                response_msg,
+                prompt_tokens,
+                completion_tokens,
+                reasoning_tokens,
+                runtime,
+            ) = self.call_client(
+                user_message,
+                system_message=system_message,
+                ignore_history=ignore_history,
+                temperature=temperature,
+                model=model,
+                write_to_file=write_to_file,
+                integrations=integrations,
+                max_output_tokens=max_output_tokens,
+                logger=logger,
+                **request_kwargs,
             )
         end = time.time()
         runtime = end - start
@@ -436,9 +455,9 @@ class LLMClient(ABC):
         if reasoning_tokens is None:
             reasoning_tokens = 0
         output_tokens = completion_tokens + reasoning_tokens
-        self.logger.info(
-                f"runtime: {runtime:.3f}s, t/s: {output_tokens / runtime:.1f} , prompt_tokens: {prompt_tokens:,.0f}, completion_tokens: {completion_tokens:,.0f}, reasoning_tokens: {reasoning_tokens:,.0f}, output tokens: {output_tokens:,.0f}"
-                )
+        logger.info(
+            f"runtime: {runtime:.3f}s, t/s: {output_tokens / runtime:.1f} , prompt_tokens: {prompt_tokens:,.0f}, completion_tokens: {completion_tokens:,.0f}, reasoning_tokens: {reasoning_tokens:,.0f}, output tokens: {output_tokens:,.0f}"
+        )
         try:
             if write_to_file or self.write_to_file:
                 self.write_json(self.history, filename=self.filename)
@@ -453,24 +472,33 @@ class LLMClient(ABC):
         return response_msg, prompt_tokens, completion_tokens, reasoning_tokens, runtime
 
     def send_request_perf(
-            self,
-            user_message,
-            system_message=None,
-            ignore_history=False,
-            temperature=0,
-            model=None,
-            write_to_file=False,
-            append=False,
-            tools=None,
-            integrations=None,
-            **kwargs,
-            ):
+        self,
+        user_message,
+        system_message=None,
+        ignore_history=False,
+        temperature=0,
+        model=None,
+        write_to_file=False,
+        append=False,
+        tools=None,
+        integrations=None,
+        logger=None,
+        **kwargs,
+    ):
         """Like :meth:`send_request` but returns only performance summary.
+
+        Args:
+            logger: Optional logger for this request; defaults to the client instance logger.
 
         Returns:
             (runtime, tokens_per_second, response_message)
         """
-        default_logger.info(f"-- GPT Request started. Used model: {model} --")
+        model = model if model is not None else self.model
+        temperature = temperature if temperature is not None else self.temperature
+        logger = self._resolve_logger(logger)
+        logger.info(
+            f"-- GPT Request started. Used model: {model}, temperature: {temperature} --"
+        )
         request_kwargs = dict(kwargs)
         tool_mapping = request_kwargs.pop("tool_mapping", None)
         slim_history = request_kwargs.pop("slim_history", False)
@@ -478,59 +506,70 @@ class LLMClient(ABC):
         if max_output_tokens is None:
             max_output_tokens = request_kwargs.pop("max_tokens", None)
         if tools is not None:
-            response_msg, prompt_tokens, completion_tokens, reasoning_tokens, runtime = (
-                    self.call_client_with_tools(
-                            user_message,
-                            tools,
-                            system_message=system_message,
-                            ignore_history=ignore_history,
-                            temperature=temperature,
-                            model=model,
-                            write_to_file=write_to_file,
-                            tool_mapping=tool_mapping,
-                            integrations=integrations,
-                            slim_history=slim_history,
-                            max_output_tokens=max_output_tokens,
-                            **request_kwargs,
-                            )
+            (
+                response_msg,
+                prompt_tokens,
+                completion_tokens,
+                reasoning_tokens,
+                runtime,
+            ) = self.call_client_with_tools(
+                user_message,
+                tools,
+                system_message=system_message,
+                ignore_history=ignore_history,
+                temperature=temperature,
+                model=model,
+                write_to_file=write_to_file,
+                tool_mapping=tool_mapping,
+                integrations=integrations,
+                slim_history=slim_history,
+                max_output_tokens=max_output_tokens,
+                logger=logger,
+                **request_kwargs,
             )
         else:
-            response_msg, prompt_tokens, completion_tokens, reasoning_tokens, runtime = (
-                    self.call_client(
-                            user_message,
-                            system_message=system_message,
-                            ignore_history=ignore_history,
-                            temperature=temperature,
-                            model=model,
-                            write_to_file=write_to_file,
-                            append=append,
-                            integrations=integrations,
-                            max_output_tokens=max_output_tokens,
-                            **request_kwargs,
-                            )
+            (
+                response_msg,
+                prompt_tokens,
+                completion_tokens,
+                reasoning_tokens,
+                runtime,
+            ) = self.call_client(
+                user_message,
+                system_message=system_message,
+                ignore_history=ignore_history,
+                temperature=temperature,
+                model=model,
+                write_to_file=write_to_file,
+                append=append,
+                integrations=integrations,
+                max_output_tokens=max_output_tokens,
+                logger=logger,
+                **request_kwargs,
             )
         output_tokens = (completion_tokens if completion_tokens is not None else 0) + (
-                reasoning_tokens if reasoning_tokens is not None else 0
+            reasoning_tokens if reasoning_tokens is not None else 0
         )
         tps = output_tokens / runtime if runtime > 0 else 0
         return runtime, tps, response_msg
 
     @abstractmethod
     def call_client_with_tools(
-            self,
-            user_message,
-            tools,
-            system_message=None,
-            ignore_history=False,
-            temperature=0,
-            model=None,
-            write_to_file=False,
-            tool_mapping=None,
-            integrations=None,
-            slim_history=False,
-            max_output_tokens=None,
-            **kwargs,
-            ):
+        self,
+        user_message,
+        tools,
+        system_message=None,
+        ignore_history=False,
+        temperature=0,
+        model=None,
+        write_to_file=False,
+        tool_mapping=None,
+        integrations=None,
+        slim_history=False,
+        max_output_tokens=None,
+        logger=None,
+        **kwargs,
+    ):
         """Execute one provider request with tool support (implemented by subclasses).
 
         Args:
@@ -549,22 +588,24 @@ class LLMClient(ABC):
 
     @abstractmethod
     def call_client(
-            self,
-            user_message,
-            system_message=None,
-            ignore_history=False,
-            temperature=0,
-            write_to_file=False,
-            model=None,
-            integrations=None,
-            max_output_tokens=None,
-            **kwargs,
-            ):
+        self,
+        user_message,
+        system_message=None,
+        ignore_history=False,
+        temperature=0,
+        write_to_file=False,
+        model=None,
+        integrations=None,
+        max_output_tokens=None,
+        logger=None,
+        **kwargs,
+    ):
         """Execute one provider request (implemented by subclasses).
 
         Args:
             integrations: Optional integration specs for this request (e.g. LM Studio MCP).
             max_output_tokens: Cap on generated tokens (``max_tokens`` alias via kwargs).
+            logger: Optional logger for this call; defaults to the client instance logger.
 
         Returns:
             (response_text, prompt_tokens, completion_tokens, reasoning_tokens, runtime)

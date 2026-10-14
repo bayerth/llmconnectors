@@ -44,5 +44,8 @@ Thumbs.db
 .env.*
 !.env.example
 
+# Local scratch
+tmp/
+
 # uv (keep uv.lock tracked for reproducible dev installs)
 # uv.lock

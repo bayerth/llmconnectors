@@ -92,6 +92,7 @@ class LMStudioClient(LLMClient):
         slim_history=False,
         context_length=None,
         max_output_tokens=None,
+        logger=None,
         **kwargs,
     ):
         """LM Studio native tools/MCP via payload; no OpenAI-style tool_mapping loop."""
@@ -106,6 +107,7 @@ class LMStudioClient(LLMClient):
             integrations=integrations,
             context_length=context_length,
             max_output_tokens=max_output_tokens,
+            logger=logger,
             **kwargs,
         )
 
@@ -121,8 +123,10 @@ class LMStudioClient(LLMClient):
         tools=None,
         context_length=None,
         max_output_tokens=None,
+        logger=None,
         **kwargs,
     ):
+        log = self._resolve_logger(logger)
         if self.uses_server_state and ignore_history:
             self.last_response_id = None
 
@@ -150,9 +154,9 @@ class LMStudioClient(LLMClient):
             response.raise_for_status()
             data = response.json()
             runtime = time.time() - start
-            self.logger.debug(f"LM Studio Request took {runtime} seconds")
+            log.debug(f"LM Studio Request took {runtime} seconds")
         except requests.RequestException as e:
-            self._log_request_error(e)
+            self._log_request_error(e, logger=log)
             return None, 0, 0, 0, 0
 
         if self.uses_server_state:
@@ -160,13 +164,13 @@ class LMStudioClient(LLMClient):
 
         response_message = self._extract_response_message(data)
         prompt_tokens, completion_tokens, reasoning_tokens = self._extract_token_usage(
-            data
+            data, logger=log
         )
 
         response_id_log = (
             f" (ID: {self.last_response_id})" if self.uses_server_state else ""
         )
-        self.logger.debug(f"LM Studio Response: {response_message}{response_id_log}")
+        log.debug(f"LM Studio Response: {response_message}{response_id_log}")
 
         self.history.append({"role": "user", "content": user_message})
         self.history.append({"role": "assistant", "content": response_message})
@@ -224,12 +228,13 @@ class LMStudioClient(LLMClient):
             return kw_context_length
         return self.context_length
 
-    def _log_request_error(self, error):
+    def _log_request_error(self, error, logger=None):
+        log = self._resolve_logger(logger)
         message = str(error)
         response = getattr(error, "response", None)
         if response is not None:
             message = f"{message}; response body: {response.text}"
-        self.logger.error(f"LM Studio API call failed: {message}")
+        log.error(f"LM Studio API call failed: {message}")
 
     def list_models(self):
         """Return model ids from ``GET /api/v1/models``."""
@@ -317,7 +322,8 @@ class LMStudioClient(LLMClient):
 
         return response_message
 
-    def _extract_token_usage(self, data):
+    def _extract_token_usage(self, data, logger=None):
+        log = self._resolve_logger(logger)
         prompt_tokens = 0
         completion_tokens = 0
         reasoning_tokens = 0
@@ -333,7 +339,7 @@ class LMStudioClient(LLMClient):
             completion_tokens = total_output - reasoning_tokens
             tokens_per_second = data["stats"].get("tokens_per_second", 0)
             time_to_first_token = data["stats"].get("time_to_first_token_seconds", 0)
-            self.logger.debug(
+            log.debug(
                 f"tokens_per_second: {tokens_per_second:,.1f}, "
                 f"time_to_first_token: {time_to_first_token:.3f}"
             )

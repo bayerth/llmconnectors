@@ -56,16 +56,18 @@ class OllamaClient(LLMClient):
         system_message=None,
         ignore_history=False,
         retrieved_information=None,
+        logger=None,
     ):
+        log = self._resolve_logger(logger)
         messages = [] if ignore_history else list(self.history)
-        self.logger.debug(f"history: {messages}")
+        log.debug(f"history: {messages}")
 
         if system_message is not None:
             messages.append({"role": "system", "content": system_message})
-        self.logger.debug(f"System message: {system_message}")
+        log.debug(f"System message: {system_message}")
 
         if retrieved_information is not None:
-            self.logger.debug(f"Retrieved information: {retrieved_information}")
+            log.debug(f"Retrieved information: {retrieved_information}")
             messages.append(
                 {
                     "role": "user",
@@ -77,7 +79,7 @@ class OllamaClient(LLMClient):
             )
         else:
             messages.append({"role": "user", "content": user_message})
-        self.logger.debug(f"User message: {user_message}")
+        log.debug(f"User message: {user_message}")
         return messages
 
     def call_client_with_tools(
@@ -94,16 +96,19 @@ class OllamaClient(LLMClient):
         slim_history=False,
         retrieved_information=None,
         max_output_tokens=None,
+        logger=None,
         **kwargs,
     ):
         """Call Ollama chat with tools and resolve requested tool calls."""
-        self.logger.debug("Calling OllamaClient with tool support")
-        self.logger.debug(f"Tools provided: {tools}")
+        log = self._resolve_logger(logger)
+        log.debug("Calling OllamaClient with tool support")
+        log.debug(f"Tools provided: {tools}")
         messages = self._build_chat_messages(
             user_message=user_message,
             system_message=system_message,
             ignore_history=ignore_history,
             retrieved_information=retrieved_information,
+            logger=log,
         )
         resolved_max_output_tokens = self._resolve_max_output_tokens(
             max_output_tokens, **kwargs
@@ -118,23 +123,23 @@ class OllamaClient(LLMClient):
             "options": options,
         }
         response, prompt_tokens, completion_tokens, reasoning_tokens, runtime = self._call_client(
-            request_kwargs
+            request_kwargs, logger=log
         )
         if not response:
             response_message = "Error: No valid response from Ollama API."
-            self.logger.error(response_message)
+            log.error(response_message)
             return response_message, prompt_tokens, completion_tokens, reasoning_tokens, runtime
 
         message = response["message"]
         if message.get("tool_calls"):
-            self.logger.debug(f"Tool calls requested: {message['tool_calls']}")
+            log.debug(f"Tool calls requested: {message['tool_calls']}")
             if not slim_history:
                 messages.append(message_to_dict(message))
             messages.extend(
                 call_requested_tools(
                     message,
                     tool_mapping=tool_mapping,
-                    logger=self.logger,
+                    logger=log,
                 )
             )
 
@@ -150,14 +155,14 @@ class OllamaClient(LLMClient):
                 follow_up_completion_tokens,
                 follow_up_reasoning_tokens,
                 follow_up_runtime,
-            ) = self._call_client(follow_up_kwargs)
+            ) = self._call_client(follow_up_kwargs, logger=log)
             prompt_tokens += follow_up_prompt_tokens
             completion_tokens += follow_up_completion_tokens
             reasoning_tokens += follow_up_reasoning_tokens
             runtime += follow_up_runtime
             if not response:
                 response_message = "Error: No valid response from Ollama API after tool call."
-                self.logger.error(response_message)
+                log.error(response_message)
                 return (
                     response_message,
                     prompt_tokens,
@@ -168,13 +173,14 @@ class OllamaClient(LLMClient):
             message = response["message"]
 
         response_content = message.get("content") or ""
-        self.logger.debug(f"Ollama Respond: {response_content}")
+        log.debug(f"Ollama Respond: {response_content}")
         self.history.append({"role": "assistant", "content": response_content})
         if write_to_file:
             self.write_json(messages, filename=self.filename)
         return response_content, prompt_tokens, completion_tokens, reasoning_tokens, runtime
 
-    def _call_client(self, request_kwargs):
+    def _call_client(self, request_kwargs, logger=None):
+        log = self._resolve_logger(logger)
         runtime = 0
         chat_kwargs = {
             "model": request_kwargs["model"],
@@ -189,9 +195,9 @@ class OllamaClient(LLMClient):
             start = time.time()
             response = self.client.chat(**chat_kwargs)
             runtime = time.time() - start
-            self.logger.debug(f"Ollama Request took {runtime:.2f} seconds")
+            log.debug(f"Ollama Request took {runtime:.2f} seconds")
         except Exception as e:
-            self.logger.error(f"Ollama API call failed: {e}")
+            log.error(f"Ollama API call failed: {e}")
             return None, 0, 0, 0, runtime
 
         prompt_tokens, completion_tokens = 0, 0
@@ -200,11 +206,11 @@ class OllamaClient(LLMClient):
                 prompt_tokens = response.get("prompt_eval_count", 0)
                 completion_tokens = response.get("eval_count", 0)
             except Exception as e:
-                self.logger.error(f"Error while determining token count: {e}")
-            self.logger.debug(f"Ollama Respond: {response['message']}")
+                log.error(f"Error while determining token count: {e}")
+            log.debug(f"Ollama Respond: {response['message']}")
         else:
             response = None
-            self.logger.error("Error: No valid response from Ollama API.")
+            log.error("Error: No valid response from Ollama API.")
         return response, prompt_tokens, completion_tokens, 0, runtime
 
     def call_client(
@@ -218,6 +224,7 @@ class OllamaClient(LLMClient):
         write_to_file=False,
         integrations=None,
         max_output_tokens=None,
+        logger=None,
         **kwargs,
     ):
         """Call ``client.chat`` with OpenAI-style roles.
@@ -225,11 +232,13 @@ class OllamaClient(LLMClient):
         Args:
             retrieved_information: Optional RAG/ontology text appended to the user message.
         """
+        log = self._resolve_logger(logger)
         messages = self._build_chat_messages(
             user_message=user_message,
             system_message=system_message,
             ignore_history=ignore_history,
             retrieved_information=retrieved_information,
+            logger=log,
         )
 
         request_kwargs = {
@@ -241,16 +250,16 @@ class OllamaClient(LLMClient):
             ),
         }
         response, prompt_tokens, completion_tokens, reasoning_tokens, runtime = self._call_client(
-            request_kwargs
+            request_kwargs, logger=log
         )
 
         if not response:
             response_message = "Error: No valid response from Ollama API."
-            self.logger.error(response_message)
+            log.error(response_message)
             return response_message, prompt_tokens, completion_tokens, reasoning_tokens, runtime
 
         response_content = response["message"].get("content") or ""
-        self.logger.debug(f"Ollama Respond: {response_content}")
+        log.debug(f"Ollama Respond: {response_content}")
         self.history.append({"role": "assistant", "content": response_content})
         if write_to_file:
             self.write_json(messages, filename=self.filename)
