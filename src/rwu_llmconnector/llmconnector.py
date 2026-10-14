@@ -63,8 +63,8 @@ def get_print_logger(
     return logger
 
 
-# Package-wide default; pass a custom logger into client constructors to override
-default_logger = get_print_logger(DEFAULT_LOGGER_NAME)
+# Package-wide default (INFO); pass a custom logger into client constructors to override
+default_logger = get_print_logger(DEFAULT_LOGGER_NAME, level=logging.INFO)
 
 
 def append_to_json_file(message, filename=None):
@@ -279,9 +279,7 @@ class LLMClient(ABC):
         self.system_message = system_messgage
         self.temperature = temperature
         self.max_output_tokens = max_output_tokens
-        self.logger = (
-            logger if logger is not None else get_print_logger(name=DEFAULT_LOGGER_NAME)
-        )
+        self.logger = logger if logger is not None else default_logger
         self.total_prompt_tokens = 0
         self.total_completion_tokens = 0
         self.total_reasoning_tokens = 0
