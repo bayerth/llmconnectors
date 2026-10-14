@@ -38,8 +38,23 @@ response, prompt_tokens, completion_tokens, reasoning_tokens, runtime = llm.send
     tools=None,          # OpenAI-compatible tool definitions
     integrations=None,   # LM Studio MCP / integration specs (per request)
     max_output_tokens=None,  # generation cap (alias: max_tokens via kwargs)
+    logger=None,         # per-request logger; default: client instance logger
     **kwargs,            # e.g. tool_mapping, timeout, context_length (LM Studio)
 )
+```
+
+`send_request_perf(...)` accepts the same arguments and returns `(runtime, tokens_per_second, response_message)` instead of token breakdown.
+
+**Logging:** Clients use `default_logger` at **INFO** (request start/end, token summary, errors). Pass `logger=` to the client constructor or to `send_request` / `send_request_perf` / `call_client` / `call_client_with_tools` to override for a single call. For a custom sink, use `get_print_logger(name, msg_producer=..., level=logging.DEBUG)`.
+
+```python
+import logging
+
+from rwu_llmconnector import OpenAIClient, get_print_logger
+
+verbose = get_print_logger("my-app", level=logging.DEBUG)
+llm = OpenAIClient(client, model="gpt-4o-mini", logger=verbose)
+llm.send_request("Hi", logger=verbose)  # same or different logger per call
 ```
 
 **Output token cap (`max_output_tokens`):** limits **generated** tokens only (not prompt/context size). Per-call values override the client default; the instance attribute is not mutated. Mapping: OpenAI → `max_completion_tokens`; LM Studio → `max_output_tokens`; Ollama → `num_predict`. Alias: `max_tokens`.
@@ -61,9 +76,13 @@ from rwu_llmconnector import (
     OllamaClient,
     LMStudioClient,
     StatefulLMStudioClient,
-    call_requested_tools,  # shared OpenAI-style tool execution helper
+    call_requested_tools,
+    default_logger,
+    get_print_logger,
 )
 ```
+
+`list_models()` is implemented on OpenAI, Ollama, and LM Studio clients (Gemini raises `NotImplementedError`).
 
 ### OpenAI
 
@@ -216,7 +235,7 @@ response, *_ = llm.send_request(
 
 ### LM Studio
 
-Default server: `http://localhost:1234` (override with `LMSTUDIO_BASE_URL` or env var).
+Default server: `http://localhost:1234` (override with `LMSTUDIO_BASE_URL` or env var). If LM Studio **Developer → Authentication** is enabled, set `LMSTUDIO_API_KEY` in `.env` or pass `api_key=` (the client also reads `LMSTUDIO_API_KEY` / `MAC_STUDIO_API_KEY` from the environment when `api_key` is omitted).
 
 ```python
 from rwu_llmconnector import LMStudioClient, StatefulLMStudioClient
@@ -225,7 +244,7 @@ from rwu_llmconnector import LMStudioClient, StatefulLMStudioClient
 llm = LMStudioClient(
     model="qwen/qwen3-4b-2507",
     base_url="http://localhost:1234",
-    api_key=None,
+    # api_key=os.environ["LMSTUDIO_API_KEY"],  # when Bearer auth is required
     # Optional defaults (only sent to the API when set):
     # context_length=8192,
     # max_output_tokens=512,
@@ -343,7 +362,7 @@ Tests load variables from `.env` via `python-dotenv`. See `.env.example` for sup
 | `OPEN_ROUTER_API_KEY` | OpenRouter (OpenAI-compatible) |
 | `GEMINI_API_KEY` or `GOOGLE_API_KEY` | Gemini |
 | `LMSTUDIO_BASE_URL`, `LMSTUDIO_MODEL` | LM Studio live tests (defaults: `http://localhost:1234`, `qwen/qwen3-4b-2507`) |
-| `LMSTUDIO_API_KEY` or `MAC_STUDIO_API_KEY` | LM Studio auth (optional locally) |
+| `LMSTUDIO_API_KEY` or `MAC_STUDIO_API_KEY` | LM Studio Bearer token (required when local auth is enabled) |
 | `OLLAMA_MODEL`, `OLLAMA_HOST` | Ollama (optional) |
 | `LMSTUDIO_MCP_MODEL` | MCP live test model (default `openai/gpt-oss-20b`) |
 | `LMSTUDIO_MCP_INTEGRATION_JSON` | Override MCP spec (e.g. plugin id from `mcp.json`) |
@@ -358,7 +377,9 @@ uv.lock                 # pinned dev dependencies
 .env.example            # template for local secrets (commit this)
 ```
 
-Do **not** commit: `.env`, `.venv/`, `dist/`, `__pycache__/`, `.pytest_cache/`, `.idea/`
+Local scratch scripts can live in `tmp/` (gitignored). Use `cp .env.example .env` and load secrets from `.env`; see `.vscode/launch.json` for `PYTHONPATH=src` when debugging scripts there.
+
+Do **not** commit: `.env`, `.venv/`, `dist/`, `__pycache__/`, `.pytest_cache/`, `.idea/`, `tmp/`
 
 ## Publishing to PyPI
 
