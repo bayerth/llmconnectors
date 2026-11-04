@@ -48,6 +48,8 @@ packages = ["src/rwu_llmconnector"]
 
 [dependency-groups]
 dev = ["pytest>=8.0", "python-dotenv>=1.0"]
+# Local Jupyter only (uv); not in [project.dependencies] — omitted from PyPI wheel requirements
+notebook = ["ipykernel>=6.29", "jupyterlab>=4.2"]
 
 [tool.pytest.ini_options]
 pythonpath = ["src", "."]

@@ -46,6 +46,8 @@ Thumbs.db
 
 # Local scratch
 tmp/
+notebooks/
+.ipynb_checkpoints/
 
 # uv (keep uv.lock tracked for reproducible dev installs)
 # uv.lock
