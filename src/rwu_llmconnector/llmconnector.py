@@ -81,6 +81,38 @@ def append_to_json_file(message, filename=None):
             path.write_text(json.dumps(data, indent=4), encoding="utf-8")
 
 
+ERROR_RESPONSE_PREFIX = "Error:"
+
+
+def is_error_response(response_msg):
+    """True if the provider call failed (``None`` or message starting with ``Error:``)."""
+    if response_msg is None:
+        return True
+    return isinstance(response_msg, str) and response_msg.startswith(ERROR_RESPONSE_PREFIX)
+
+
+def normalize_error_response(response_msg, default=f"{ERROR_RESPONSE_PREFIX} Request failed."):
+    """Map ``None`` to a stable error string; leave other values unchanged."""
+    if response_msg is None:
+        return default
+    return response_msg
+
+
+def log_api_exception(logger, error, provider="API"):
+    """Log an HTTP/SDK failure, including response body when present."""
+    message = str(error)
+    response = getattr(error, "response", None)
+    if response is not None:
+        body = getattr(response, "text", None)
+        if body is None:
+            body = getattr(response, "body", None)
+        if body is not None:
+            if isinstance(body, bytes):
+                body = body.decode("utf-8", errors="replace")
+            message = f"{message}; response body: {body}"
+    logger.error(f"{provider} call failed: {message}")
+
+
 def _log_via_logger(logger, level, message):
     if logger is not None:
         getattr(logger, level)(message)
@@ -227,6 +259,121 @@ def call_requested_tools(message, tool_mapping, logger=None):
     return messages
 
 
+def convert_chat_completion_tools_to_responses(tools):
+    """Convert Chat Completions tool defs to Responses API ``tools`` (internally tagged)."""
+    if tools is None:
+        return None
+    converted = []
+    for tool in tools:
+        if not isinstance(tool, dict):
+            converted.append(tool)
+            continue
+        if tool.get("type") == "function" and isinstance(tool.get("function"), dict):
+            function = tool["function"]
+            entry = {
+                "type": "function",
+                "name": function["name"],
+                "description": function.get("description"),
+                "parameters": function.get("parameters"),
+            }
+            if "strict" in function:
+                entry["strict"] = function["strict"]
+            converted.append({k: v for k, v in entry.items() if v is not None})
+        else:
+            converted.append(tool)
+    return converted
+
+
+def extract_responses_function_calls(response):
+    """Return ``function_call`` output items from a Responses API ``response``."""
+    calls = []
+    output = getattr(response, "output", None) if response is not None else None
+    if not output:
+        return calls
+    for item in output:
+        item_type = item.get("type") if isinstance(item, dict) else getattr(item, "type", None)
+        if item_type == "function_call":
+            calls.append(item)
+    return calls
+
+
+def execute_responses_function_calls(function_calls, tool_mapping, logger=None):
+    """Run handlers and return ``function_call_output`` input items for the next request."""
+    if tool_mapping is None:
+        raise ValueError("tool_mapping is required when the model requests tool calls.")
+
+    outputs = []
+    for index, function_call in enumerate(function_calls, start=1):
+        if isinstance(function_call, dict):
+            name = function_call.get("name")
+            call_id = function_call.get("call_id")
+            arguments = function_call.get("arguments", "{}")
+        else:
+            name = function_call.name
+            call_id = function_call.call_id
+            arguments = function_call.arguments
+
+        if name not in tool_mapping:
+            raise KeyError(f"No tool handler configured for '{name}'.")
+
+        if isinstance(arguments, dict):
+            tool_args = arguments
+        elif arguments in (None, ""):
+            tool_args = {}
+        else:
+            tool_args = json.loads(arguments)
+
+        _log_via_logger(
+            logger,
+            "debug",
+            f"Calling tool {index}/{len(function_calls)}: {name} "
+            f"(call_id={call_id}, args={tool_args})",
+        )
+        try:
+            tool_response = tool_mapping[name](**tool_args)
+        except Exception as e:
+            _log_via_logger(
+                logger,
+                "error",
+                f"Tool call failed: {name} (call_id={call_id}): {e}",
+            )
+            raise
+
+        if isinstance(tool_response, str):
+            output = tool_response
+        else:
+            output = json.dumps(tool_response, default=str)
+
+        outputs.append(
+            {
+                "type": "function_call_output",
+                "call_id": call_id,
+                "output": output,
+            }
+        )
+    return outputs
+
+
+def _response_item_to_input_dict(item):
+    serialized = model_to_dict(item)
+    if isinstance(serialized, dict):
+        return serialized
+    if hasattr(item, "type"):
+        payload = {"type": getattr(item, "type", None)}
+        for key in ("name", "call_id", "arguments", "role", "content", "id", "status"):
+            if hasattr(item, key):
+                payload[key] = getattr(item, key)
+        return payload
+    return serialized
+
+
+def responses_output_items_for_input(response):
+    """Serialize ``response.output`` items for the next Responses ``input``."""
+    if response is None or not getattr(response, "output", None):
+        return []
+    return [_response_item_to_input_dict(item) for item in response.output]
+
+
 def resolve_max_output_tokens(max_output_tokens=None, instance_default=None, **kwargs):
     """Resolve generation token cap: explicit arg, kwargs, ``max_tokens`` alias, instance default."""
     if max_output_tokens is not None:
@@ -356,6 +503,70 @@ class LLMClient(ABC):
         """Use per-call ``logger`` when set, otherwise :attr:`logger`."""
         return logger if logger is not None else self.logger
 
+    def _preview_user_message(self, user_message, limit=200):
+        text = user_message if user_message is not None else ""
+        if len(text) <= limit:
+            return text
+        return text[:limit] + "..."
+
+    def _call_provider(
+        self,
+        user_message,
+        *,
+        tools,
+        logger,
+        model,
+        system_message,
+        ignore_history,
+        temperature,
+        write_to_file,
+        tool_mapping,
+        integrations,
+        slim_history,
+        max_output_tokens,
+        append=False,
+        request_kwargs,
+    ):
+        """Invoke :meth:`call_client` or :meth:`call_client_with_tools`; log and re-raise on failure."""
+        try:
+            if tools is not None:
+                return self.call_client_with_tools(
+                    user_message,
+                    tools,
+                    system_message=system_message,
+                    ignore_history=ignore_history,
+                    temperature=temperature,
+                    model=model,
+                    write_to_file=write_to_file,
+                    tool_mapping=tool_mapping,
+                    integrations=integrations,
+                    slim_history=slim_history,
+                    max_output_tokens=max_output_tokens,
+                    logger=logger,
+                    **request_kwargs,
+                )
+            return self.call_client(
+                user_message,
+                system_message=system_message,
+                ignore_history=ignore_history,
+                temperature=temperature,
+                model=model,
+                write_to_file=write_to_file,
+                append=append,
+                integrations=integrations,
+                max_output_tokens=max_output_tokens,
+                logger=logger,
+                **request_kwargs,
+            )
+        except Exception:
+            logger.exception(
+                "LLM request failed (model=%s, tools=%s): %s",
+                model,
+                tools is not None,
+                self._preview_user_message(user_message),
+            )
+            raise
+
     def send_request(
         self,
         user_message,
@@ -388,6 +599,8 @@ class LLMClient(ABC):
 
         Returns:
             Tuple of (response_text, prompt_tokens, completion_tokens, reasoning_tokens, runtime).
+            On provider failure the first element is a string starting with ``Error:`` (never ``None``).
+            Tool/config errors propagate as exceptions.
         """
         model = model if model is not None else self.model
         temperature = temperature if temperature is not None else self.temperature
@@ -403,70 +616,57 @@ class LLMClient(ABC):
         max_output_tokens = request_kwargs.pop("max_output_tokens", None)
         if max_output_tokens is None:
             max_output_tokens = request_kwargs.pop("max_tokens", None)
-        if tools is not None:
-            (
-                response_msg,
-                prompt_tokens,
-                completion_tokens,
-                reasoning_tokens,
-                runtime,
-            ) = self.call_client_with_tools(
-                user_message,
-                tools,
-                system_message=system_message,
-                ignore_history=ignore_history,
-                temperature=temperature,
-                model=model,
-                write_to_file=write_to_file,
-                tool_mapping=tool_mapping,
-                integrations=integrations,
-                slim_history=slim_history,
-                max_output_tokens=max_output_tokens,
-                logger=logger,
-                **request_kwargs,
-            )
-        else:
-            (
-                response_msg,
-                prompt_tokens,
-                completion_tokens,
-                reasoning_tokens,
-                runtime,
-            ) = self.call_client(
-                user_message,
-                system_message=system_message,
-                ignore_history=ignore_history,
-                temperature=temperature,
-                model=model,
-                write_to_file=write_to_file,
-                integrations=integrations,
-                max_output_tokens=max_output_tokens,
-                logger=logger,
-                **request_kwargs,
-            )
-        end = time.time()
-        runtime = end - start
+        (
+            response_msg,
+            prompt_tokens,
+            completion_tokens,
+            reasoning_tokens,
+            _provider_runtime,
+        ) = self._call_provider(
+            user_message,
+            tools=tools,
+            logger=logger,
+            model=model,
+            system_message=system_message,
+            ignore_history=ignore_history,
+            temperature=temperature,
+            write_to_file=write_to_file,
+            tool_mapping=tool_mapping,
+            integrations=integrations,
+            slim_history=slim_history,
+            max_output_tokens=max_output_tokens,
+            request_kwargs=request_kwargs,
+        )
+        runtime = time.time() - start
+        response_msg = normalize_error_response(response_msg)
         if prompt_tokens is None:
             prompt_tokens = 0
         if completion_tokens is None:
             completion_tokens = 0
         if reasoning_tokens is None:
             reasoning_tokens = 0
-        output_tokens = completion_tokens + reasoning_tokens
-        logger.info(
-            f"runtime: {runtime:.3f}s, t/s: {output_tokens / runtime:.1f} , prompt_tokens: {prompt_tokens:,.0f}, completion_tokens: {completion_tokens:,.0f}, reasoning_tokens: {reasoning_tokens:,.0f}, output tokens: {output_tokens:,.0f}"
-        )
-        try:
-            if write_to_file or self.write_to_file:
-                self.write_json(self.history, filename=self.filename)
-        except Exception as e:
-            self.logger.error(f"Error writing history: {e}")
-            self.logger.debug(f"Stacktrace:\n{traceback.format_exc()}")
+        failed = is_error_response(response_msg)
+        if failed:
+            logger.error(f"Request finished with error: {response_msg}")
+        else:
+            output_tokens = completion_tokens + reasoning_tokens
+            tps = output_tokens / runtime if runtime > 0 else 0.0
+            logger.info(
+                f"runtime: {runtime:.3f}s, t/s: {tps:.1f} , prompt_tokens: {prompt_tokens:,.0f}, "
+                f"completion_tokens: {completion_tokens:,.0f}, reasoning_tokens: {reasoning_tokens:,.0f}, "
+                f"output tokens: {output_tokens:,.0f}"
+            )
+            try:
+                if write_to_file or self.write_to_file:
+                    self.write_json(self.history, filename=self.filename)
+            except Exception as e:
+                self.logger.error(f"Error writing history: {e}")
+                self.logger.debug(f"Stacktrace:\n{traceback.format_exc()}")
 
-        self.total_runtime += runtime
-        self.total_prompt_tokens += prompt_tokens
-        self.total_completion_tokens += completion_tokens
-        self.total_reasoning_tokens += reasoning_tokens
+            self.total_runtime += runtime
+            self.total_prompt_tokens += prompt_tokens
+            self.total_completion_tokens += completion_tokens
+            self.total_reasoning_tokens += reasoning_tokens
         return response_msg, prompt_tokens, completion_tokens, reasoning_tokens, runtime
 
     def send_request_perf(
@@ -503,48 +703,34 @@ class LLMClient(ABC):
         max_output_tokens = request_kwargs.pop("max_output_tokens", None)
         if max_output_tokens is None:
             max_output_tokens = request_kwargs.pop("max_tokens", None)
-        if tools is not None:
-            (
-                response_msg,
-                prompt_tokens,
-                completion_tokens,
-                reasoning_tokens,
-                runtime,
-            ) = self.call_client_with_tools(
-                user_message,
-                tools,
-                system_message=system_message,
-                ignore_history=ignore_history,
-                temperature=temperature,
-                model=model,
-                write_to_file=write_to_file,
-                tool_mapping=tool_mapping,
-                integrations=integrations,
-                slim_history=slim_history,
-                max_output_tokens=max_output_tokens,
-                logger=logger,
-                **request_kwargs,
-            )
-        else:
-            (
-                response_msg,
-                prompt_tokens,
-                completion_tokens,
-                reasoning_tokens,
-                runtime,
-            ) = self.call_client(
-                user_message,
-                system_message=system_message,
-                ignore_history=ignore_history,
-                temperature=temperature,
-                model=model,
-                write_to_file=write_to_file,
-                append=append,
-                integrations=integrations,
-                max_output_tokens=max_output_tokens,
-                logger=logger,
-                **request_kwargs,
-            )
+        start = time.time()
+        (
+            response_msg,
+            prompt_tokens,
+            completion_tokens,
+            reasoning_tokens,
+            _provider_runtime,
+        ) = self._call_provider(
+            user_message,
+            tools=tools,
+            logger=logger,
+            model=model,
+            system_message=system_message,
+            ignore_history=ignore_history,
+            temperature=temperature,
+            write_to_file=write_to_file,
+            tool_mapping=tool_mapping,
+            integrations=integrations,
+            slim_history=slim_history,
+            max_output_tokens=max_output_tokens,
+            append=append,
+            request_kwargs=request_kwargs,
+        )
+        runtime = time.time() - start
+        response_msg = normalize_error_response(response_msg)
+        if is_error_response(response_msg):
+            logger.error(f"Request finished with error: {response_msg}")
+            return runtime, 0.0, response_msg
         output_tokens = (completion_tokens if completion_tokens is not None else 0) + (
             reasoning_tokens if reasoning_tokens is not None else 0
         )

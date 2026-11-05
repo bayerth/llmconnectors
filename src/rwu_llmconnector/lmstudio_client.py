@@ -142,9 +142,9 @@ class LMStudioClient(LLMClient):
             integrations=integrations,
         )
         headers = self._build_headers()
-
+        runtime = 0.0
+        start = time.time()
         try:
-            start = time.time()
             response = requests.post(
                 self.base_url,
                 headers=headers,
@@ -156,8 +156,10 @@ class LMStudioClient(LLMClient):
             runtime = time.time() - start
             log.debug(f"LM Studio Request took {runtime} seconds")
         except requests.RequestException as e:
-            self._log_request_error(e, logger=log)
-            return None, 0, 0, 0, 0
+            runtime = time.time() - start
+            error_message = self._format_request_error(e)
+            log.error(error_message)
+            return error_message, 0, 0, 0, runtime
 
         if self.uses_server_state:
             self.last_response_id = data.get("response_id")
@@ -228,13 +230,16 @@ class LMStudioClient(LLMClient):
             return kw_context_length
         return self.context_length
 
-    def _log_request_error(self, error, logger=None):
-        log = self._resolve_logger(logger)
+    def _format_request_error(self, error):
         message = str(error)
         response = getattr(error, "response", None)
         if response is not None:
             message = f"{message}; response body: {response.text}"
-        log.error(f"LM Studio API call failed: {message}")
+        return f"Error: LM Studio API call failed: {message}"
+
+    def _log_request_error(self, error, logger=None):
+        log = self._resolve_logger(logger)
+        log.error(self._format_request_error(error))
 
     def list_models(self):
         """Return model ids from ``GET /api/v1/models``."""

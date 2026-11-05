@@ -4,7 +4,7 @@ Unified Python connectors for calling large language models through a common int
 
 Supported backends:
 
-- **OpenAI** (official API, tool/function calling)
+- **OpenAI** (Chat Completions and **Responses** API, tool/function calling)
 - **OpenRouter** and other **OpenAI-compatible** endpoints
 - **Google Gemini** (`google-genai`)
 - **Ollama** (local server, tool/function calling)
@@ -57,6 +57,8 @@ llm = OpenAIClient(client, model="gpt-4o-mini", logger=verbose)
 llm.send_request("Hi", logger=verbose)  # same or different logger per call
 ```
 
+**Errors:** Provider HTTP/SDK failures return a tuple whose first element is a string starting with `Error:` (never `None`). Check with `is_error_response(response)` or `response.startswith("Error:")`. Details are logged at ERROR (including response bodies when available). `send_request` skips the success token summary and does **not** update cumulative counters on those failures. Tool misconfiguration and handler bugs still raise exceptions; `send_request` logs them with `logger.exception(...)` and re-raises.
+
 **Output token cap (`max_output_tokens`):** limits **generated** tokens only (not prompt/context size). Per-call values override the client default; the instance attribute is not mutated. Mapping: OpenAI → `max_completion_tokens`; LM Studio → `max_output_tokens`; Ollama → `num_predict`. Alias: `max_tokens`.
 
 **LM Studio `context_length`:** omit by default so the server uses the context of the **already loaded** model (avoid sending a mismatched value, e.g. 8000 vs 8192). Set on the client or per request when you need an explicit cap:
@@ -72,6 +74,7 @@ llm.send_request("...", context_length=8192)             # LM Studio only
 from rwu_llmconnector import (
     LLMClient,
     OpenAIClient,
+    OpenAIResponsesClient,
     GeminiClient,
     OllamaClient,
     LMStudioClient,
@@ -79,12 +82,20 @@ from rwu_llmconnector import (
     call_requested_tools,
     default_logger,
     get_print_logger,
+    is_error_response,
 )
 ```
 
 `list_models()` is implemented on OpenAI, Ollama, and LM Studio clients (Gemini raises `NotImplementedError`).
 
 ### OpenAI
+
+| Client | API | Use when |
+|--------|-----|----------|
+| `OpenAIClient` | `chat.completions.create` | OpenRouter, OpenAI-compatible proxies, existing integrations |
+| `OpenAIResponsesClient` | `responses.create` | Official OpenAI only; reasoning models, native tools, [`previous_response_id`](https://developers.openai.com/api/docs/guides/migrate-to-responses) |
+
+#### Chat Completions (`OpenAIClient`)
 
 ```python
 from openai import OpenAI
@@ -139,6 +150,39 @@ response, *_ = llm.send_request(
 You can also call `llm.call_client_with_tools()` directly. `call_client_with_tool()` is a backward-compatible alias.
 
 Optional: `slim_history=True` omits the assistant tool-call message from the follow-up context (keeps history lean).
+
+#### Responses API (`OpenAIResponsesClient`)
+
+Same `send_request()` / `tool_mapping` surface; tools may use Chat Completions shape — they are converted to Responses-style function definitions automatically. Tool follow-ups use `function_call` / `function_call_output` items per [OpenAI’s migration guide](https://developers.openai.com/api/docs/guides/migrate-to-responses).
+
+```python
+from openai import OpenAI
+from rwu_llmconnector import OpenAIResponsesClient
+
+client = OpenAI(api_key="your-openai-api-key")
+llm = OpenAIResponsesClient(client, model="gpt-4o-mini")
+
+response, *_ = llm.send_request(
+    "What is PyPI?",
+    system_message="you are a helpful assistant",
+    max_output_tokens=512,
+)
+```
+
+Stateful turns on the OpenAI side (optional):
+
+```python
+llm = OpenAIResponsesClient(
+    client,
+    model="gpt-4o-mini",
+    use_previous_response_id=True,
+    store=True,
+)
+llm.send_request("First question", ignore_history=True)
+llm.send_request("Follow-up")  # chains via previous_response_id
+```
+
+`max_output_tokens` is sent as `max_output_tokens` on the Responses request (not `max_completion_tokens`).
 
 To reuse tool execution outside `OpenAIClient`:
 

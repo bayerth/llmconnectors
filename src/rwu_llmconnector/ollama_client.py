@@ -8,6 +8,7 @@ from rwu_llmconnector.llmconnector import (
     LLMClient,
     call_requested_tools,
     default_logger,
+    log_api_exception,
     message_to_dict,
 )
 
@@ -197,7 +198,7 @@ class OllamaClient(LLMClient):
             runtime = time.time() - start
             log.debug(f"Ollama Request took {runtime:.2f} seconds")
         except Exception as e:
-            log.error(f"Ollama API call failed: {e}")
+            log_api_exception(log, e, provider="Ollama")
             return None, 0, 0, 0, runtime
 
         prompt_tokens, completion_tokens = 0, 0

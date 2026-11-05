@@ -16,6 +16,7 @@ from rwu_llmconnector.llmconnector import (
     call_requested_tools,
     default_logger,
     get_print_logger,
+    is_error_response,
 )
 from rwu_llmconnector.lmstudio_client import (
     LOCAL_HISTORY_CONTEXT,
@@ -25,6 +26,7 @@ from rwu_llmconnector.lmstudio_client import (
 )
 from rwu_llmconnector.ollama_client import OllamaClient
 from rwu_llmconnector.openai_client import OpenAIClient
+from rwu_llmconnector.openai_responses_client import OpenAIResponsesClient
 
 __all__ = [
     "GeminiClient",
@@ -34,11 +36,13 @@ __all__ = [
     "LMStudioClient",
     "OllamaClient",
     "OpenAIClient",
+    "OpenAIResponsesClient",
     "SERVER_STATE_CONTEXT",
     "StatefulLMStudioClient",
     "DEFAULT_LOGGER_NAME",
     "default_logger",
     "get_print_logger",
+    "is_error_response",
 ]
 
-__version__ = "0.2.0"
+__version__ = "0.3.0"

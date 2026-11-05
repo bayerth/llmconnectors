@@ -2,7 +2,7 @@
 
 import time
 from google.genai import types
-from rwu_llmconnector.llmconnector import LLMClient, default_logger
+from rwu_llmconnector.llmconnector import LLMClient, default_logger, log_api_exception
 
 
 class GeminiClient(LLMClient):
@@ -134,12 +134,19 @@ class GeminiClient(LLMClient):
         )
         prompt = types.Content(role="user", parts=[types.Part.from_text(text=msg)])
         start = time.time()
-        response = self.client.models.generate_content(
-            model="gemini-2.5-flash-lite", contents=[prompt]
-        )
-        end = time.time()
-        runtime = end - start
-        message = response.text
+        try:
+            response = self.client.models.generate_content(
+                model="gemini-2.5-flash-lite", contents=[prompt]
+            )
+        except Exception as e:
+            runtime = time.time() - start
+            log_api_exception(log, e, provider="Gemini")
+            return f"Error: Gemini API call failed: {e}", 0, 0, 0, runtime
+        runtime = time.time() - start
+        message = response.text or ""
+        if not message.strip():
+            log.error("Error: No valid response from Gemini API.")
+            return "Error: No valid response from Gemini API.", 0, 0, 0, runtime
         log.debug(f"history: {message}")
         user_history = "" if constraints is None else constraints
         user_history += (

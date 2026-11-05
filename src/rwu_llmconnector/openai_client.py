@@ -2,7 +2,12 @@
 
 import time
 
-from rwu_llmconnector.llmconnector import LLMClient, call_requested_tools, message_to_dict
+from rwu_llmconnector.llmconnector import (
+    LLMClient,
+    call_requested_tools,
+    log_api_exception,
+    message_to_dict,
+)
 
 
 class OpenAIClient(LLMClient):
@@ -156,7 +161,7 @@ class OpenAIClient(LLMClient):
             runtime = time.time() - start
             log.debug(f"GPT Request took {runtime:,.2f} seconds")
         except Exception as e:
-            log.error(f"API call failed: {e}")
+            log_api_exception(log, e, provider="OpenAI")
             return None, 0, 0, 0, runtime
 
         prompt_tokens, completion_tokens, reasoning_tokens = 0, 0, 0

@@ -279,7 +279,8 @@ def test_call_client_logs_http_error_response_body(mock_post):
 
     result = client.call_client("hi", ignore_history=True)
 
-    assert result[0] is None
+    assert result[0].startswith("Error:")
+    assert "out of memory" in result[0]
     client.logger.error.assert_called_once()
     assert "out of memory" in client.logger.error.call_args.args[0]
 
