@@ -4,6 +4,7 @@ import time
 
 from ollama import Client
 
+from rwu_llmconnector.image_input import build_ollama_image_base64_list
 from rwu_llmconnector.llmconnector import (
     LLMClient,
     call_requested_tools,
@@ -57,6 +58,7 @@ class OllamaClient(LLMClient):
         system_message=None,
         ignore_history=False,
         retrieved_information=None,
+        images=None,
         logger=None,
     ):
         log = self._resolve_logger(logger)
@@ -69,17 +71,21 @@ class OllamaClient(LLMClient):
 
         if retrieved_information is not None:
             log.debug(f"Retrieved information: {retrieved_information}")
-            messages.append(
-                {
-                    "role": "user",
-                    "content": (
-                        f"{user_message}. Here is ontology retrieved information "
-                        f"based on the topic: {retrieved_information}"
-                    ),
-                }
-            )
+            user_entry = {
+                "role": "user",
+                "content": (
+                    f"{user_message}. Here is ontology retrieved information "
+                    f"based on the topic: {retrieved_information}"
+                ),
+            }
+            if images:
+                user_entry["images"] = build_ollama_image_base64_list(images)
+            messages.append(user_entry)
         else:
-            messages.append({"role": "user", "content": user_message})
+            user_entry = {"role": "user", "content": user_message}
+            if images:
+                user_entry["images"] = build_ollama_image_base64_list(images)
+            messages.append(user_entry)
         log.debug(f"User message: {user_message}")
         return messages
 
@@ -104,11 +110,13 @@ class OllamaClient(LLMClient):
         log = self._resolve_logger(logger)
         log.debug("Calling OllamaClient with tool support")
         log.debug(f"Tools provided: {tools}")
+        images = kwargs.pop("images", None)
         messages = self._build_chat_messages(
             user_message=user_message,
             system_message=system_message,
             ignore_history=ignore_history,
             retrieved_information=retrieved_information,
+            images=images,
             logger=log,
         )
         resolved_max_output_tokens = self._resolve_max_output_tokens(
@@ -234,11 +242,13 @@ class OllamaClient(LLMClient):
             retrieved_information: Optional RAG/ontology text appended to the user message.
         """
         log = self._resolve_logger(logger)
+        images = kwargs.pop("images", None)
         messages = self._build_chat_messages(
             user_message=user_message,
             system_message=system_message,
             ignore_history=ignore_history,
             retrieved_information=retrieved_information,
+            images=images,
             logger=log,
         )
 

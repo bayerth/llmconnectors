@@ -596,6 +596,10 @@ class LLMClient(ABC):
             logger: Optional logger for this request; defaults to the client instance logger.
             **kwargs: Forwarded to :meth:`call_client` or :meth:`call_client_with_tools`.
                 Accepts ``max_output_tokens`` or alias ``max_tokens`` (generation cap).
+                Multimodal: ``images`` (paths, bytes, data URLs, or ``{"path": ...}`` / ``{"data_url": ...}``).
+                Structured output: ``response_format`` or ``json_schema`` (+ name/strict).
+                ``OpenAIClient`` → Chat Completions ``response_format``;
+                ``OpenAIResponsesClient`` → Responses ``text.format`` (alias ``text_format=``).
 
         Returns:
             Tuple of (response_text, prompt_tokens, completion_tokens, reasoning_tokens, runtime).

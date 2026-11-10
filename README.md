@@ -39,9 +39,12 @@ response, prompt_tokens, completion_tokens, reasoning_tokens, runtime = llm.send
     integrations=None,   # LM Studio MCP / integration specs (per request)
     max_output_tokens=None,  # generation cap (alias: max_tokens via kwargs)
     logger=None,         # per-request logger; default: client instance logger
+    images=None,         # multimodal: paths, bytes, data URLs (provider support varies)
     **kwargs,            # e.g. tool_mapping, timeout, context_length (LM Studio)
 )
 ```
+
+`images` is a list of file paths, raw `bytes`, `data:image/...;base64,...` strings, `https://...` URLs (OpenAI / Responses only), or dicts such as `{"path": "..."}` / `{"data_url": "..."}`. Conversation `history` stores **text only**; re-attach images on later turns if needed.
 
 `send_request_perf(...)` accepts the same arguments and returns `(runtime, tokens_per_second, response_message)` instead of token breakdown.
 
@@ -79,6 +82,7 @@ from rwu_llmconnector import (
     OllamaClient,
     LMStudioClient,
     StatefulLMStudioClient,
+    build_json_schema_response_format,
     call_requested_tools,
     default_logger,
     get_print_logger,
@@ -116,6 +120,48 @@ Pass `max_output_tokens` (or `max_tokens`) to cap the assistant reply; OpenAI re
 ```python
 response, *_ = llm.send_request("What is PyPI?", max_output_tokens=256)
 ```
+
+#### Vision (images)
+
+```python
+response, *_ = llm.send_request(
+    "What is in this image?",
+    images=["/path/to/photo.png"],
+    ignore_history=True,
+)
+```
+
+Remote `https://` image URLs are passed through to the API (OpenAI, OpenRouter, Responses). LM Studio, Ollama, and Gemini require embeddable data (path, bytes, or data URL).
+
+#### Structured output (JSON schema)
+
+Uses Chat Completions `response_format` (also works with LM Studio via `OpenAIClient` and `base_url="http://localhost:1234/v1"`):
+
+```python
+from rwu_llmconnector import build_json_schema_response_format
+
+schema = {
+    "type": "object",
+    "properties": {
+        "answer": {"type": "string"},
+        "confidence": {"type": "number"},
+    },
+    "required": ["answer", "confidence"],
+    "additionalProperties": False,
+}
+
+response, *_ = llm.send_request(
+    "Rate PyPI in one sentence.",
+    json_schema=schema,
+    json_schema_name="rating",
+    ignore_history=True,
+)
+# or: response_format=build_json_schema_response_format("rating", schema)
+import json
+data = json.loads(response)
+```
+
+Some reasoning models return JSON in `reasoning_content`; the client falls back to that field when `content` is empty (common with local OpenAI-compatible hosts).
 
 #### Tool calling
 
@@ -184,6 +230,36 @@ llm.send_request("Follow-up")  # chains via previous_response_id
 
 `max_output_tokens` is sent as `max_output_tokens` on the Responses request (not `max_completion_tokens`).
 
+Vision on the Responses API:
+
+```python
+response, *_ = llm.send_request(
+    "Describe the image.",
+    images=["screenshot.png"],
+    ignore_history=True,
+)
+```
+
+Structured output uses the Responses `text.format` field (same `json_schema` / `response_format` kwargs as `OpenAIClient`):
+
+```python
+schema = {
+    "type": "object",
+    "properties": {"summary": {"type": "string"}},
+    "required": ["summary"],
+    "additionalProperties": False,
+}
+
+response, *_ = llm.send_request(
+    "Summarize PyPI in one line.",
+    json_schema=schema,
+    json_schema_name="summary",
+    ignore_history=True,
+)
+```
+
+Advanced: pass a full `text={...}` or `text_format={...}` dict for native Responses options.
+
 To reuse tool execution outside `OpenAIClient`:
 
 ```python
@@ -235,6 +311,16 @@ response, *_ = llm.send_request(
 print(response)
 ```
 
+Vision (skips the XML prompt template when `images` is set; uses native multimodal `generate_content`):
+
+```python
+response, *_ = llm.send_request(
+    "What is shown?",
+    images=["diagram.png"],
+    ignore_history=True,
+)
+```
+
 ### Ollama
 
 ```python
@@ -250,6 +336,16 @@ print(response)
 ```
 
 `max_output_tokens` maps to Ollama `num_predict` in chat `options`.
+
+Vision ([Ollama images](https://github.com/ollama/ollama/blob/main/docs/api.md#request-with-images)) — use a vision-capable model (e.g. `llava`):
+
+```python
+response, *_ = llm.send_request(
+    "What is in the image?",
+    images=["photo.jpg"],
+    ignore_history=True,
+)
+```
 
 Tool calling uses the same `tools` / `tool_mapping` pattern as OpenAI ([Ollama chat API](https://github.com/ollama/ollama/blob/main/docs/api.md#chat-request-with-history-with-tools)):
 
@@ -309,6 +405,18 @@ print(response)
 | `max_output_tokens` | `max_output_tokens=512` | same; alias `max_tokens` | `max_output_tokens` |
 
 Do not set `context_length` unless you mean to — a value that does not match the loaded model can force LM Studio to reload and fail (e.g. OOM). Per-request `context_length` / `max_output_tokens` do **not** change `self.context_length` / `self.max_output_tokens`.
+
+**Vision (native `/api/v1/chat`)** — `input` items with `type: "image"` and `data_url` (base64 data URL):
+
+```python
+response, *_ = llm.send_request(
+    "Describe the picture.",
+    images=["/path/to/image.png"],
+    ignore_history=True,
+)
+```
+
+With `StatefulLMStudioClient`, image turns use the same list-shaped `input` (not plain text). Structured JSON schema output on LM Studio is available via **`OpenAIClient`** against `http://localhost:1234/v1`, not the native `LMStudioClient` endpoint.
 
 For server-side context (`store=True`, `previous_response_id` chain), use `StatefulLMStudioClient`.
 

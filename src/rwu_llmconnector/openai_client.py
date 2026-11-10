@@ -2,6 +2,10 @@
 
 import time
 
+from rwu_llmconnector.image_input import (
+    build_openai_user_content,
+    resolve_response_format,
+)
 from rwu_llmconnector.llmconnector import (
     LLMClient,
     call_requested_tools,
@@ -26,6 +30,18 @@ class OpenAIClient(LLMClient):
             self.logger.error(f"Failed to list OpenAI models: {e}")
             return []
 
+    @staticmethod
+    def _assistant_text(message):
+        content = getattr(message, "content", None) or ""
+        if isinstance(content, str) and content.strip():
+            return content
+        reasoning = getattr(message, "reasoning_content", None)
+        if isinstance(reasoning, str) and reasoning.strip():
+            return reasoning
+        if isinstance(content, str):
+            return content
+        return str(content) if content is not None else ""
+
     def _build_chat_request_kwargs(
         self,
         messages,
@@ -33,6 +49,7 @@ class OpenAIClient(LLMClient):
         temperature,
         tools=None,
         max_output_tokens=None,
+        response_format=None,
     ):
         request_kwargs = {
             "model": model,
@@ -44,6 +61,8 @@ class OpenAIClient(LLMClient):
             request_kwargs["tools"] = tools
         if max_output_tokens is not None:
             request_kwargs["max_completion_tokens"] = max_output_tokens
+        if response_format is not None:
+            request_kwargs["response_format"] = response_format
         return request_kwargs
 
     def call_client_with_tools(
@@ -72,7 +91,10 @@ class OpenAIClient(LLMClient):
         if system_message is not None:
             messages.append({"role": "system", "content": system_message})
         log.debug(f"System message: {system_message}")
-        messages.append({"role": "user", "content": user_message})
+        images = kwargs.pop("images", None)
+        response_format = resolve_response_format(kwargs)
+        user_content = build_openai_user_content(user_message, images)
+        messages.append({"role": "user", "content": user_content})
         log.debug(f"User message: {user_message}")
 
         resolved_model = self.model if model is None else model
@@ -85,6 +107,7 @@ class OpenAIClient(LLMClient):
             temperature=temperature,
             tools=tools,
             max_output_tokens=resolved_max_output_tokens,
+            response_format=response_format,
         )
         (
             response_choice,
@@ -117,6 +140,7 @@ class OpenAIClient(LLMClient):
                 temperature=temperature,
                 tools=tools,
                 max_output_tokens=resolved_max_output_tokens,
+                response_format=response_format,
             )
             (
                 response_choice,
@@ -141,7 +165,7 @@ class OpenAIClient(LLMClient):
                 )
             response_message = response_choice.message
 
-        response_content = response_message.content or ""
+        response_content = self._assistant_text(response_message)
         log.debug(f"GPT Respond: {response_content}")
         self.history.append({"role": "assistant", "content": response_content})
         if write_to_file:
@@ -209,7 +233,10 @@ class OpenAIClient(LLMClient):
         if system_message is not None:
             messages.append({"role": "system", "content": system_message})
         log.debug(f"System message: {system_message}")
-        messages.append({"role": "user", "content": user_message})
+        images = kwargs.pop("images", None)
+        response_format = resolve_response_format(kwargs)
+        user_content = build_openai_user_content(user_message, images)
+        messages.append({"role": "user", "content": user_content})
         log.debug(f"User message: {user_message}")
 
         request_kwargs = self._build_chat_request_kwargs(
@@ -217,6 +244,7 @@ class OpenAIClient(LLMClient):
             model=self.model if model is None else model,
             temperature=temperature,
             max_output_tokens=self._resolve_max_output_tokens(max_output_tokens, **kwargs),
+            response_format=response_format,
         )
         (
             response_choice,
@@ -231,7 +259,7 @@ class OpenAIClient(LLMClient):
             log.error(response_message)
             return response_message, prompt_tokens, completion_tokens, reasoning_tokens, runtime
 
-        response_content = response_choice.message.content or ""
+        response_content = self._assistant_text(response_choice.message)
         log.debug(f"GPT Respond: {response_content}")
         self.history.append({"role": "assistant", "content": response_content})
         if write_to_file:

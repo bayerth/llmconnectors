@@ -10,6 +10,7 @@ Quick start::
 """
 
 from rwu_llmconnector.gemini_client import GeminiClient
+from rwu_llmconnector.image_input import build_json_schema_response_format
 from rwu_llmconnector.llmconnector import (
     DEFAULT_LOGGER_NAME,
     LLMClient,
@@ -30,6 +31,7 @@ from rwu_llmconnector.openai_responses_client import OpenAIResponsesClient
 
 __all__ = [
     "GeminiClient",
+    "build_json_schema_response_format",
     "LLMClient",
     "call_requested_tools",
     "LOCAL_HISTORY_CONTEXT",

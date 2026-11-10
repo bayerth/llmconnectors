@@ -1,7 +1,10 @@
 """Google Gemini client with structured XML prompts."""
 
 import time
+
 from google.genai import types
+
+from rwu_llmconnector.image_input import resolve_image_sources
 from rwu_llmconnector.llmconnector import LLMClient, default_logger, log_api_exception
 
 
@@ -117,6 +120,8 @@ class GeminiClient(LLMClient):
             The API model id is currently fixed to ``gemini-2.5-flash-lite`` in the request.
         """
         log = self._resolve_logger(logger)
+        images = kwargs.pop("images", None)
+        resolved_images = resolve_image_sources(images)
         system_instruction = "" if system_message is None else system_message
         history = (
             ""
@@ -126,17 +131,33 @@ class GeminiClient(LLMClient):
             )
         )
         log.debug(f"history: {history}")
-        msg = self.prompt_template.format(
-            role=self.system_message,
-            constraints=self.constraints if constraints is None else constraints,
-            context=system_instruction,
-            task=history + " " + user_message,
-        )
-        prompt = types.Content(role="user", parts=[types.Part.from_text(text=msg)])
+        resolved_model = self.model if model is None else model
+
+        if resolved_images:
+            parts = [types.Part.from_text(text=user_message)]
+            for item in resolved_images:
+                if item["bytes"] is None:
+                    raise ValueError(
+                        "Gemini requires embeddable image data (file path, bytes, or data URL); "
+                        "remote http(s) URLs are not downloaded automatically."
+                    )
+                parts.append(
+                    types.Part.from_bytes(data=item["bytes"], mime_type=item["mime"])
+                )
+            prompt = types.Content(role="user", parts=parts)
+        else:
+            msg = self.prompt_template.format(
+                role=self.system_message,
+                constraints=self.constraints if constraints is None else constraints,
+                context=system_instruction,
+                task=history + " " + user_message,
+            )
+            prompt = types.Content(role="user", parts=[types.Part.from_text(text=msg)])
+
         start = time.time()
         try:
             response = self.client.models.generate_content(
-                model="gemini-2.5-flash-lite", contents=[prompt]
+                model=resolved_model or "gemini-2.5-flash-lite", contents=[prompt]
             )
         except Exception as e:
             runtime = time.time() - start

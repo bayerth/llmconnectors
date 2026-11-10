@@ -5,6 +5,7 @@ import time
 
 import requests
 
+from rwu_llmconnector.image_input import build_lmstudio_input_items
 from rwu_llmconnector.llmconnector import LLMClient
 
 DEFAULT_LMSTUDIO_BASE_URL = os.getenv("LMSTUDIO_BASE_URL", "http://localhost:1234")
@@ -130,6 +131,7 @@ class LMStudioClient(LLMClient):
         if self.uses_server_state and ignore_history:
             self.last_response_id = None
 
+        images = kwargs.pop("images", None)
         payload = self._build_payload(
             user_message=user_message,
             system_message=system_message,
@@ -140,6 +142,7 @@ class LMStudioClient(LLMClient):
             max_output_tokens=self._resolve_max_output_tokens(max_output_tokens, **kwargs),
             tools=tools,
             integrations=integrations,
+            images=images,
         )
         headers = self._build_headers()
         runtime = 0.0
@@ -199,10 +202,11 @@ class LMStudioClient(LLMClient):
         max_output_tokens=None,
         tools=None,
         integrations=None,
+        images=None,
     ):
         payload = {
             "model": model if model is not None else self.model,
-            "input": self._build_input(user_message, ignore_history),
+            "input": self._build_input(user_message, ignore_history, images=images),
             "system_prompt": self._resolve_system_prompt(system_message),
             "integrations": self._resolve_integrations(integrations),
             "temperature": temperature,
@@ -268,16 +272,20 @@ class LMStudioClient(LLMClient):
                     names.append(name)
         return names
 
-    def _build_input(self, user_message, ignore_history):
-        if self.uses_server_state:
+    def _build_input(self, user_message, ignore_history, images=None):
+        has_images = bool(images)
+        if self.uses_server_state and not has_images:
             return user_message
 
-        input_data = []
+        prior: list[str] = []
         if not ignore_history:
             for entry in self.history:
-                input_data.append({"type": "text", "content": entry["content"]})
-        input_data.append({"type": "text", "content": user_message})
-        return input_data
+                prior.append(entry["content"])
+        return build_lmstudio_input_items(
+            user_message,
+            images,
+            prior_text_contents=prior,
+        )
 
     def _resolve_system_prompt(self, system_message):
         if system_message is not None:

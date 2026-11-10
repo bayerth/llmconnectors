@@ -121,3 +121,52 @@ def test_responses_tool_loop_follows_up(mock_call_responses):
     assert prompt == 13
     assert completion == 8
     assert reasoning == 1
+
+
+@patch("rwu_llmconnector.openai_responses_client.OpenAIResponsesClient._call_responses")
+def test_responses_client_maps_json_schema_to_text_format(mock_call_responses):
+    mock_call_responses.return_value = (
+        SimpleNamespace(output_text='{"a":1}', output=[], id="resp_1", usage=None),
+        1,
+        2,
+        0,
+        0.1,
+    )
+    api = MagicMock()
+    client = OpenAIResponsesClient(api, model="gpt-4o-mini")
+    schema = {
+        "type": "object",
+        "properties": {"a": {"type": "integer"}},
+        "required": ["a"],
+        "additionalProperties": False,
+    }
+    client.call_client("json", ignore_history=True, json_schema=schema, json_schema_name="nums")
+
+    request_kwargs = mock_call_responses.call_args.args[0]
+    assert request_kwargs["text"]["format"]["type"] == "json_schema"
+    assert request_kwargs["text"]["format"]["name"] == "nums"
+    assert request_kwargs["text"]["format"]["schema"] == schema
+
+
+@patch("rwu_llmconnector.openai_responses_client.OpenAIResponsesClient._call_responses")
+def test_responses_client_multimodal_input_blocks(mock_call_responses):
+    import base64
+
+    mock_call_responses.return_value = (
+        SimpleNamespace(output_text="red", output=[], id="resp_1", usage=None),
+        1,
+        1,
+        0,
+        0.1,
+    )
+    png = base64.b64decode(
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z5+BAQAG/wL1Cq0inwAAAABJRU5ErkJggg=="
+    )
+    api = MagicMock()
+    client = OpenAIResponsesClient(api, model="gpt-4o-mini")
+    client.call_client("color?", ignore_history=True, images=[png])
+
+    request_kwargs = mock_call_responses.call_args.args[0]
+    content = request_kwargs["input"][0]["content"]
+    assert content[0]["type"] == "input_text"
+    assert content[1]["type"] == "input_image"

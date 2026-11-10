@@ -2,6 +2,10 @@
 
 import time
 
+from rwu_llmconnector.image_input import (
+    build_responses_user_content,
+    resolve_responses_text_config,
+)
 from rwu_llmconnector.llmconnector import (
     LLMClient,
     convert_chat_completion_tools_to_responses,
@@ -51,8 +55,15 @@ class OpenAIResponsesClient(LLMClient):
             return system_message
         return self.system_message
 
-    def _build_message_input(self, user_message, ignore_history=False):
+    def _build_message_input(self, user_message, ignore_history=False, images=None):
+        user_content = (
+            build_responses_user_content(user_message, images)
+            if images
+            else user_message
+        )
         if self.use_previous_response_id:
+            if images:
+                return [{"role": "user", "content": user_content}]
             return user_message
         messages = []
         if not ignore_history:
@@ -60,8 +71,8 @@ class OpenAIResponsesClient(LLMClient):
                 role = entry.get("role")
                 if role in {"user", "assistant", "system"}:
                     messages.append({"role": role, "content": entry["content"]})
-        messages.append({"role": "user", "content": user_message})
-        if len(messages) == 1:
+        messages.append({"role": "user", "content": user_content})
+        if len(messages) == 1 and not images:
             return messages[0]["content"]
         return messages
 
@@ -74,6 +85,7 @@ class OpenAIResponsesClient(LLMClient):
         tools=None,
         max_output_tokens=None,
         previous_response_id=None,
+        text=None,
     ):
         request_kwargs = {
             "model": model,
@@ -86,6 +98,8 @@ class OpenAIResponsesClient(LLMClient):
             request_kwargs["tools"] = convert_chat_completion_tools_to_responses(tools)
         if max_output_tokens is not None:
             request_kwargs["max_output_tokens"] = max_output_tokens
+        if text is not None:
+            request_kwargs["text"] = text
         if self.store is not None:
             request_kwargs["store"] = self.store
         if previous_response_id:
@@ -224,6 +238,8 @@ class OpenAIResponsesClient(LLMClient):
     ):
         log = self._resolve_logger(logger)
         log.debug("Calling OpenAIResponsesClient with tool support")
+        images = kwargs.pop("images", None)
+        text_config = resolve_responses_text_config(kwargs)
         resolved_model = self.model if model is None else model
         instructions = self._resolve_instructions(system_message)
         previous_response_id = None
@@ -233,13 +249,16 @@ class OpenAIResponsesClient(LLMClient):
             previous_response_id = self.last_response_id
 
         request_kwargs = self._build_responses_request_kwargs(
-            input_data=self._build_message_input(user_message, ignore_history=ignore_history),
+            input_data=self._build_message_input(
+                user_message, ignore_history=ignore_history, images=images
+            ),
             model=resolved_model,
             temperature=temperature,
             instructions=instructions,
             tools=tools,
             max_output_tokens=self._resolve_max_output_tokens(max_output_tokens, **kwargs),
             previous_response_id=previous_response_id,
+            text=text_config,
         )
 
         response, prompt_tokens, completion_tokens, reasoning_tokens, runtime = self._run_responses_tool_loop(
@@ -278,6 +297,8 @@ class OpenAIResponsesClient(LLMClient):
         **kwargs,
     ):
         log = self._resolve_logger(logger)
+        images = kwargs.pop("images", None)
+        text_config = resolve_responses_text_config(kwargs)
         resolved_model = self.model if model is None else model
         instructions = self._resolve_instructions(system_message)
         previous_response_id = None
@@ -287,12 +308,15 @@ class OpenAIResponsesClient(LLMClient):
             previous_response_id = self.last_response_id
 
         request_kwargs = self._build_responses_request_kwargs(
-            input_data=self._build_message_input(user_message, ignore_history=ignore_history),
+            input_data=self._build_message_input(
+                user_message, ignore_history=ignore_history, images=images
+            ),
             model=resolved_model,
             temperature=temperature,
             instructions=instructions,
             max_output_tokens=self._resolve_max_output_tokens(max_output_tokens, **kwargs),
             previous_response_id=previous_response_id,
+            text=text_config,
         )
         response, prompt_tokens, completion_tokens, reasoning_tokens, runtime = self._call_responses(
             request_kwargs, logger=log
