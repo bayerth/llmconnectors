@@ -11,7 +11,9 @@ import time
 import logging
 import traceback
 from abc import ABC, abstractmethod
+from dataclasses import dataclass, field, replace
 from pathlib import Path
+from typing import Any
 
 
 def default_log(log_string):
@@ -84,6 +86,91 @@ def append_to_json_file(message, filename=None):
 ERROR_RESPONSE_PREFIX = "Error:"
 
 
+@dataclass
+class LLMCallResult:
+    """Structured result of :meth:`LLMClient.call_client` / :meth:`LLMClient.send_request`."""
+
+    text: str
+    prompt_tokens: int = 0
+    completion_tokens: int = 0
+    reasoning_tokens: int = 0
+    runtime: float = 0.0
+    time_to_first_token: float | None = None
+    tokens_per_second: float | None = None
+    extras: dict[str, Any] = field(default_factory=dict)
+
+    @property
+    def failed(self) -> bool:
+        return is_error_response(self.text)
+
+    @property
+    def output_tokens(self) -> int:
+        return self.completion_tokens + self.reasoning_tokens
+
+    @property
+    def generation_time(self) -> float | None:
+        """Wall/API ``runtime`` minus TTFT when TTFT is known (generation/decode phase only)."""
+        if self.time_to_first_token is None:
+            return None
+        remaining = self.runtime - self.time_to_first_token
+        if remaining <= 0:
+            return None
+        return remaining
+
+    @property
+    def tokens_per_second_generation(self) -> float | None:
+        """Output tokens per second during generation (excludes TTFT / prefill wait).
+
+        Prefers server ``tokens_per_second`` when set; otherwise ``output_tokens / generation_time``.
+        """
+        if self.tokens_per_second is not None:
+            return self.tokens_per_second
+        gen_time = self.generation_time
+        if gen_time is None or self.output_tokens <= 0:
+            return None
+        return self.output_tokens / gen_time
+
+    @property
+    def tokens_per_second_wall(self) -> float | None:
+        """Output tokens over total ``runtime`` (includes TTFT — misleading for decode speed)."""
+        if self.runtime <= 0 or self.output_tokens <= 0:
+            return None
+        return self.output_tokens / self.runtime
+
+    def as_tuple(self):
+        """Legacy 5-tuple ``(text, prompt, completion, reasoning, runtime)``."""
+        return (
+            self.text,
+            self.prompt_tokens,
+            self.completion_tokens,
+            self.reasoning_tokens,
+            self.runtime,
+        )
+
+
+def llm_call_result(
+    text,
+    prompt_tokens=0,
+    completion_tokens=0,
+    reasoning_tokens=0,
+    runtime=0.0,
+    *,
+    time_to_first_token=None,
+    tokens_per_second=None,
+    extras=None,
+):
+    return LLMCallResult(
+        text=text,
+        prompt_tokens=prompt_tokens or 0,
+        completion_tokens=completion_tokens or 0,
+        reasoning_tokens=reasoning_tokens or 0,
+        runtime=runtime or 0.0,
+        time_to_first_token=time_to_first_token,
+        tokens_per_second=tokens_per_second,
+        extras=dict(extras) if extras else {},
+    )
+
+
 def is_error_response(response_msg):
     """True if the provider call failed (``None`` or message starting with ``Error:``)."""
     if response_msg is None:
@@ -125,6 +212,35 @@ def model_to_dict(value):
     if hasattr(value, "dict"):
         return value.dict(exclude_none=True)
     return value
+
+
+def extract_chat_completion_stats(response):
+    """Return server ``stats`` from an OpenAI-style chat completion when present (e.g. some local hosts)."""
+    data = model_to_dict(response)
+    if not isinstance(data, dict):
+        return None
+    stats = data.get("stats")
+    if not isinstance(stats, dict) or not stats:
+        return None
+    result = {}
+    ttft = stats.get("time_to_first_token_seconds")
+    if ttft is not None:
+        result["time_to_first_token_seconds"] = ttft
+    tps = stats.get("tokens_per_second")
+    if tps is not None:
+        result["tokens_per_second"] = tps
+    return result or None
+
+
+def apply_chat_stream_kwargs(request_kwargs: dict, kwargs: dict) -> bool:
+    """Move ``stream`` / ``stream_options`` from call kwargs into the API request; return whether streaming."""
+    stream = kwargs.pop("stream", False)
+    if stream:
+        request_kwargs["stream"] = True
+    stream_options = kwargs.pop("stream_options", None)
+    if stream_options is not None:
+        request_kwargs["stream_options"] = stream_options
+    return stream
 
 
 def message_to_dict(message):
@@ -503,6 +619,40 @@ class LLMClient(ABC):
         """Use per-call ``logger`` when set, otherwise :attr:`logger`."""
         return logger if logger is not None else self.logger
 
+    def _log_request_metrics(self, logger, result: LLMCallResult, runtime: float | None = None):
+        """Provider-agnostic success summary (runtime, optional TTFT, tokens/s, token counts)."""
+        if result.failed:
+            return
+        wall = result.runtime if runtime is None else runtime
+        output_tokens = result.output_tokens
+        gen_tps = result.tokens_per_second_generation
+        if gen_tps is not None:
+            tps_label = "t/s (gen)"
+            tps_value = gen_tps
+        elif result.tokens_per_second is not None:
+            tps_label = "t/s (server)"
+            tps_value = result.tokens_per_second
+        else:
+            tps_label = "t/s (wall)"
+            tps_value = output_tokens / wall if wall > 0 else 0.0
+        parts = [
+            f"runtime: {wall:.3f}s",
+            f"{tps_label}: {tps_value:.1f}",
+            f"prompt_tokens: {result.prompt_tokens:,.0f}",
+            f"completion_tokens: {result.completion_tokens:,.0f}",
+            f"reasoning_tokens: {result.reasoning_tokens:,.0f}",
+            f"output_tokens: {output_tokens:,.0f}",
+        ]
+        if result.time_to_first_token is not None:
+            parts.insert(1, f"ttft: {result.time_to_first_token:.3f}s")
+        logger.info(", ".join(parts))
+
+    def _finish_call_result(self, logger, result: LLMCallResult, *, log_metrics: bool = True):
+        """Optionally log unified metrics and return ``result``."""
+        if log_metrics:
+            self._log_request_metrics(logger, result)
+        return result
+
     def _preview_user_message(self, user_message, limit=200):
         text = user_message if user_message is not None else ""
         if len(text) <= limit:
@@ -602,9 +752,8 @@ class LLMClient(ABC):
                 ``OpenAIResponsesClient`` → Responses ``text.format`` (alias ``text_format=``).
 
         Returns:
-            Tuple of (response_text, prompt_tokens, completion_tokens, reasoning_tokens, runtime).
-            On provider failure the first element is a string starting with ``Error:`` (never ``None``).
-            Tool/config errors propagate as exceptions.
+            :class:`LLMCallResult` (``text``, token counts, ``runtime``, optional ``time_to_first_token``).
+            On provider failure ``text`` starts with ``Error:``. Tool/config errors propagate as exceptions.
         """
         model = model if model is not None else self.model
         temperature = temperature if temperature is not None else self.temperature
@@ -620,13 +769,8 @@ class LLMClient(ABC):
         max_output_tokens = request_kwargs.pop("max_output_tokens", None)
         if max_output_tokens is None:
             max_output_tokens = request_kwargs.pop("max_tokens", None)
-        (
-            response_msg,
-            prompt_tokens,
-            completion_tokens,
-            reasoning_tokens,
-            _provider_runtime,
-        ) = self._call_provider(
+        request_kwargs["log_metrics"] = False
+        result = self._call_provider(
             user_message,
             tools=tools,
             logger=logger,
@@ -642,24 +786,17 @@ class LLMClient(ABC):
             request_kwargs=request_kwargs,
         )
         runtime = time.time() - start
-        response_msg = normalize_error_response(response_msg)
-        if prompt_tokens is None:
-            prompt_tokens = 0
-        if completion_tokens is None:
-            completion_tokens = 0
-        if reasoning_tokens is None:
-            reasoning_tokens = 0
-        failed = is_error_response(response_msg)
+        text = normalize_error_response(result.text)
+        result = replace(
+            result,
+            text=text,
+            runtime=runtime,
+        )
+        failed = result.failed
         if failed:
-            logger.error(f"Request finished with error: {response_msg}")
+            logger.error(f"Request finished with error: {result.text}")
         else:
-            output_tokens = completion_tokens + reasoning_tokens
-            tps = output_tokens / runtime if runtime > 0 else 0.0
-            logger.info(
-                f"runtime: {runtime:.3f}s, t/s: {tps:.1f} , prompt_tokens: {prompt_tokens:,.0f}, "
-                f"completion_tokens: {completion_tokens:,.0f}, reasoning_tokens: {reasoning_tokens:,.0f}, "
-                f"output tokens: {output_tokens:,.0f}"
-            )
+            self._log_request_metrics(logger, result, runtime=runtime)
             try:
                 if write_to_file or self.write_to_file:
                     self.write_json(self.history, filename=self.filename)
@@ -668,78 +805,10 @@ class LLMClient(ABC):
                 self.logger.debug(f"Stacktrace:\n{traceback.format_exc()}")
 
             self.total_runtime += runtime
-            self.total_prompt_tokens += prompt_tokens
-            self.total_completion_tokens += completion_tokens
-            self.total_reasoning_tokens += reasoning_tokens
-        return response_msg, prompt_tokens, completion_tokens, reasoning_tokens, runtime
-
-    def send_request_perf(
-        self,
-        user_message,
-        system_message=None,
-        ignore_history=False,
-        temperature=0,
-        model=None,
-        write_to_file=False,
-        append=False,
-        tools=None,
-        integrations=None,
-        logger=None,
-        **kwargs,
-    ):
-        """Like :meth:`send_request` but returns only performance summary.
-
-        Args:
-            logger: Optional logger for this request; defaults to the client instance logger.
-
-        Returns:
-            (runtime, tokens_per_second, response_message)
-        """
-        model = model if model is not None else self.model
-        temperature = temperature if temperature is not None else self.temperature
-        logger = self._resolve_logger(logger)
-        logger.info(
-            f"-- GPT Request started. Used model: {model}, temperature: {temperature} --"
-        )
-        request_kwargs = dict(kwargs)
-        tool_mapping = request_kwargs.pop("tool_mapping", None)
-        slim_history = request_kwargs.pop("slim_history", False)
-        max_output_tokens = request_kwargs.pop("max_output_tokens", None)
-        if max_output_tokens is None:
-            max_output_tokens = request_kwargs.pop("max_tokens", None)
-        start = time.time()
-        (
-            response_msg,
-            prompt_tokens,
-            completion_tokens,
-            reasoning_tokens,
-            _provider_runtime,
-        ) = self._call_provider(
-            user_message,
-            tools=tools,
-            logger=logger,
-            model=model,
-            system_message=system_message,
-            ignore_history=ignore_history,
-            temperature=temperature,
-            write_to_file=write_to_file,
-            tool_mapping=tool_mapping,
-            integrations=integrations,
-            slim_history=slim_history,
-            max_output_tokens=max_output_tokens,
-            append=append,
-            request_kwargs=request_kwargs,
-        )
-        runtime = time.time() - start
-        response_msg = normalize_error_response(response_msg)
-        if is_error_response(response_msg):
-            logger.error(f"Request finished with error: {response_msg}")
-            return runtime, 0.0, response_msg
-        output_tokens = (completion_tokens if completion_tokens is not None else 0) + (
-            reasoning_tokens if reasoning_tokens is not None else 0
-        )
-        tps = output_tokens / runtime if runtime > 0 else 0
-        return runtime, tps, response_msg
+            self.total_prompt_tokens += result.prompt_tokens
+            self.total_completion_tokens += result.completion_tokens
+            self.total_reasoning_tokens += result.reasoning_tokens
+        return result
 
     @abstractmethod
     def call_client_with_tools(
@@ -769,8 +838,7 @@ class LLMClient(ABC):
             max_output_tokens: Cap on generated tokens (``max_tokens`` alias via kwargs).
 
         Returns:
-            (response_text, prompt_tokens, completion_tokens, reasoning_tokens, runtime)
-            or ``(None, None, None, None, None)`` on failure.
+            :class:`LLMCallResult`
         """
         pass
 
@@ -796,8 +864,7 @@ class LLMClient(ABC):
             logger: Optional logger for this call; defaults to the client instance logger.
 
         Returns:
-            (response_text, prompt_tokens, completion_tokens, reasoning_tokens, runtime)
-            or ``(None, None, None, None, None)`` on failure.
+            :class:`LLMCallResult`
         """
         pass
 

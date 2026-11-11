@@ -9,6 +9,7 @@ from rwu_llmconnector.llmconnector import (
     LLMClient,
     call_requested_tools,
     default_logger,
+    llm_call_result,
     log_api_exception,
     message_to_dict,
 )
@@ -108,6 +109,7 @@ class OllamaClient(LLMClient):
     ):
         """Call Ollama chat with tools and resolve requested tool calls."""
         log = self._resolve_logger(logger)
+        log_metrics = kwargs.pop("log_metrics", True)
         log.debug("Calling OllamaClient with tool support")
         log.debug(f"Tools provided: {tools}")
         images = kwargs.pop("images", None)
@@ -137,7 +139,17 @@ class OllamaClient(LLMClient):
         if not response:
             response_message = "Error: No valid response from Ollama API."
             log.error(response_message)
-            return response_message, prompt_tokens, completion_tokens, reasoning_tokens, runtime
+            return self._finish_call_result(
+                log,
+                llm_call_result(
+                    response_message,
+                    prompt_tokens,
+                    completion_tokens,
+                    reasoning_tokens,
+                    runtime,
+                ),
+                log_metrics=log_metrics,
+            )
 
         message = response["message"]
         if message.get("tool_calls"):
@@ -172,12 +184,16 @@ class OllamaClient(LLMClient):
             if not response:
                 response_message = "Error: No valid response from Ollama API after tool call."
                 log.error(response_message)
-                return (
-                    response_message,
-                    prompt_tokens,
-                    completion_tokens,
-                    reasoning_tokens,
-                    runtime,
+                return self._finish_call_result(
+                    log,
+                    llm_call_result(
+                        response_message,
+                        prompt_tokens,
+                        completion_tokens,
+                        reasoning_tokens,
+                        runtime,
+                    ),
+                    log_metrics=log_metrics,
                 )
             message = response["message"]
 
@@ -186,7 +202,17 @@ class OllamaClient(LLMClient):
         self.history.append({"role": "assistant", "content": response_content})
         if write_to_file:
             self.write_json(messages, filename=self.filename)
-        return response_content, prompt_tokens, completion_tokens, reasoning_tokens, runtime
+        return self._finish_call_result(
+            log,
+            llm_call_result(
+                response_content,
+                prompt_tokens,
+                completion_tokens,
+                reasoning_tokens,
+                runtime,
+            ),
+            log_metrics=log_metrics,
+        )
 
     def _call_client(self, request_kwargs, logger=None):
         log = self._resolve_logger(logger)
@@ -242,6 +268,7 @@ class OllamaClient(LLMClient):
             retrieved_information: Optional RAG/ontology text appended to the user message.
         """
         log = self._resolve_logger(logger)
+        log_metrics = kwargs.pop("log_metrics", True)
         images = kwargs.pop("images", None)
         messages = self._build_chat_messages(
             user_message=user_message,
@@ -267,11 +294,31 @@ class OllamaClient(LLMClient):
         if not response:
             response_message = "Error: No valid response from Ollama API."
             log.error(response_message)
-            return response_message, prompt_tokens, completion_tokens, reasoning_tokens, runtime
+            return self._finish_call_result(
+                log,
+                llm_call_result(
+                    response_message,
+                    prompt_tokens,
+                    completion_tokens,
+                    reasoning_tokens,
+                    runtime,
+                ),
+                log_metrics=log_metrics,
+            )
 
         response_content = response["message"].get("content") or ""
         log.debug(f"Ollama Respond: {response_content}")
         self.history.append({"role": "assistant", "content": response_content})
         if write_to_file:
             self.write_json(messages, filename=self.filename)
-        return response_content, prompt_tokens, completion_tokens, reasoning_tokens, runtime
+        return self._finish_call_result(
+            log,
+            llm_call_result(
+                response_content,
+                prompt_tokens,
+                completion_tokens,
+                reasoning_tokens,
+                runtime,
+            ),
+            log_metrics=log_metrics,
+        )

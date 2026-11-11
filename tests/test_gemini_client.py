@@ -23,4 +23,4 @@ def gemini_client():
 @requires_gemini
 def test_gemini_client_answers_pypi_question(gemini_client):
     response = run_client_query(gemini_client)
-    assert_llm_response(*response)
+    assert_llm_response(response)

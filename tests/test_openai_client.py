@@ -17,4 +17,4 @@ def openai_client():
 @requires_openai
 def test_openai_client_answers_pypi_question(openai_client):
     response = run_client_query(openai_client)
-    assert_llm_response(*response)
+    assert_llm_response(response)

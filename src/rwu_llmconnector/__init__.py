@@ -6,18 +6,21 @@ Quick start::
     from rwu_llmconnector import OpenAIClient
 
     llm = OpenAIClient(OpenAI(), model="gpt-4o-mini")
-    text, *_ = llm.send_request("Hello", system_message="you are a helpful assistant")
+    result = llm.send_request("Hello", system_message="you are a helpful assistant")
+    print(result.text)
 """
 
 from rwu_llmconnector.gemini_client import GeminiClient
 from rwu_llmconnector.image_input import build_json_schema_response_format
 from rwu_llmconnector.llmconnector import (
     DEFAULT_LOGGER_NAME,
+    LLMCallResult,
     LLMClient,
     call_requested_tools,
     default_logger,
     get_print_logger,
     is_error_response,
+    llm_call_result,
 )
 from rwu_llmconnector.lmstudio_client import (
     LOCAL_HISTORY_CONTEXT,
@@ -32,7 +35,9 @@ from rwu_llmconnector.openai_responses_client import OpenAIResponsesClient
 __all__ = [
     "GeminiClient",
     "build_json_schema_response_format",
+    "LLMCallResult",
     "LLMClient",
+    "llm_call_result",
     "call_requested_tools",
     "LOCAL_HISTORY_CONTEXT",
     "LMStudioClient",
@@ -47,4 +52,4 @@ __all__ = [
     "is_error_response",
 ]
 
-__version__ = "0.4.0"
+__version__ = "0.5.0"

@@ -6,7 +6,7 @@ import time
 import requests
 
 from rwu_llmconnector.image_input import build_lmstudio_input_items
-from rwu_llmconnector.llmconnector import LLMClient
+from rwu_llmconnector.llmconnector import LLMClient, llm_call_result
 
 DEFAULT_LMSTUDIO_BASE_URL = os.getenv("LMSTUDIO_BASE_URL", "http://localhost:1234")
 DEFAULT_LMSTUDIO_API_KEY = os.getenv("LMSTUDIO_API_KEY") or os.getenv(
@@ -128,6 +128,7 @@ class LMStudioClient(LLMClient):
         **kwargs,
     ):
         log = self._resolve_logger(logger)
+        log_metrics = kwargs.pop("log_metrics", True)
         if self.uses_server_state and ignore_history:
             self.last_response_id = None
 
@@ -162,15 +163,21 @@ class LMStudioClient(LLMClient):
             runtime = time.time() - start
             error_message = self._format_request_error(e)
             log.error(error_message)
-            return error_message, 0, 0, 0, runtime
+            return self._finish_call_result(
+                log, llm_call_result(error_message, runtime=runtime), log_metrics=log_metrics
+            )
 
         if self.uses_server_state:
             self.last_response_id = data.get("response_id")
 
         response_message = self._extract_response_message(data)
-        prompt_tokens, completion_tokens, reasoning_tokens = self._extract_token_usage(
-            data, logger=log
-        )
+        (
+            prompt_tokens,
+            completion_tokens,
+            reasoning_tokens,
+            time_to_first_token,
+            tokens_per_second,
+        ) = self._extract_token_usage(data, logger=log)
 
         response_id_log = (
             f" (ID: {self.last_response_id})" if self.uses_server_state else ""
@@ -183,12 +190,22 @@ class LMStudioClient(LLMClient):
         if write_to_file:
             self.write_json(self.history, filename=self.filename)
 
-        return (
-            response_message,
-            prompt_tokens,
-            completion_tokens,
-            reasoning_tokens,
-            runtime,
+        extras = {}
+        if self.uses_server_state and self.last_response_id:
+            extras["response_id"] = self.last_response_id
+        return self._finish_call_result(
+            log,
+            llm_call_result(
+                response_message,
+                prompt_tokens,
+                completion_tokens,
+                reasoning_tokens,
+                runtime,
+                time_to_first_token=time_to_first_token,
+                tokens_per_second=tokens_per_second,
+                extras=extras,
+            ),
+            log_metrics=log_metrics,
         )
 
     def _build_payload(
@@ -340,6 +357,8 @@ class LMStudioClient(LLMClient):
         prompt_tokens = 0
         completion_tokens = 0
         reasoning_tokens = 0
+        time_to_first_token = None
+        tokens_per_second = None
 
         if "usage" in data:
             prompt_tokens = data["usage"].get("prompt_tokens", 0)
@@ -350,14 +369,28 @@ class LMStudioClient(LLMClient):
             reasoning_tokens = data["stats"].get("reasoning_output_tokens", 0)
             total_output = data["stats"].get("total_output_tokens", 0)
             completion_tokens = total_output - reasoning_tokens
-            tokens_per_second = data["stats"].get("tokens_per_second", 0)
-            time_to_first_token = data["stats"].get("time_to_first_token_seconds", 0)
-            log.debug(
-                f"tokens_per_second: {tokens_per_second:,.1f}, "
-                f"time_to_first_token: {time_to_first_token:.3f}"
-            )
+            tokens_per_second = data["stats"].get("tokens_per_second")
+            time_to_first_token = data["stats"].get("time_to_first_token_seconds")
+            if time_to_first_token is not None or tokens_per_second is not None:
+                ttft_log = (
+                    f"{time_to_first_token:.3f}s"
+                    if time_to_first_token is not None
+                    else "n/a"
+                )
+                tps_log = (
+                    f"{tokens_per_second:,.1f}"
+                    if tokens_per_second is not None
+                    else "n/a"
+                )
+                log.debug(f"time_to_first_token: {ttft_log}, tokens_per_second: {tps_log}")
 
-        return prompt_tokens, completion_tokens, reasoning_tokens
+        return (
+            prompt_tokens,
+            completion_tokens,
+            reasoning_tokens,
+            time_to_first_token,
+            tokens_per_second,
+        )
 
 
 class StatefulLMStudioClient(LMStudioClient):

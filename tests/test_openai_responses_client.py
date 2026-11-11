@@ -107,20 +107,20 @@ def test_responses_tool_loop_follows_up(mock_call_responses):
     ]
     api = MagicMock()
     client = OpenAIResponsesClient(api, model="gpt-4o-mini")
-    text, prompt, completion, reasoning, runtime = client.call_client_with_tools(
+    result = client.call_client_with_tools(
         "echo hello",
         tools=tools,
         tool_mapping={"echo": lambda text: text},
         ignore_history=True,
     )
 
-    assert text == "hello"
+    assert result.text == "hello"
     assert mock_call_responses.call_count == 2
     second_input = mock_call_responses.call_args_list[1].args[0]["input"]
     assert any(item.get("type") == "function_call_output" for item in second_input)
-    assert prompt == 13
-    assert completion == 8
-    assert reasoning == 1
+    assert result.prompt_tokens == 13
+    assert result.completion_tokens == 8
+    assert result.reasoning_tokens == 1
 
 
 @patch("rwu_llmconnector.openai_responses_client.OpenAIResponsesClient._call_responses")

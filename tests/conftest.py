@@ -27,13 +27,16 @@ SYSTEM_PROMPT = "you are a helpful assistant"
 USER_QUERY = "What is pypi"
 
 
-def assert_llm_response(response_msg, prompt_tokens, completion_tokens, reasoning_tokens, runtime):
-    assert response_msg is not None, "response message must not be None"
-    assert response_msg.strip(), "response message must not be empty"
-    assert runtime is not None and runtime >= 0
-    assert prompt_tokens is not None and prompt_tokens >= 0
-    assert completion_tokens is not None and completion_tokens >= 0
-    assert reasoning_tokens is not None and reasoning_tokens >= 0
+def assert_llm_response(result):
+    from rwu_llmconnector import LLMCallResult
+
+    assert isinstance(result, LLMCallResult)
+    assert result.text is not None, "response text must not be None"
+    assert result.text.strip(), "response text must not be empty"
+    assert result.runtime is not None and result.runtime >= 0
+    assert result.prompt_tokens is not None and result.prompt_tokens >= 0
+    assert result.completion_tokens is not None and result.completion_tokens >= 0
+    assert result.reasoning_tokens is not None and result.reasoning_tokens >= 0
 
 
 def run_client_query(client):

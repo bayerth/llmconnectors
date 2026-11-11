@@ -73,6 +73,8 @@ def test_openai_call_client_sends_response_format(mock_call_client):
         1,
         0,
         0.1,
+        None,
+        None,
     )
     client = OpenAIClient(client=MagicMock(), model="gpt-4o-mini")
     schema = {
@@ -99,6 +101,8 @@ def test_openai_call_client_multimodal_user_content(mock_call_client):
         1,
         0,
         0.1,
+        None,
+        None,
     )
     client = OpenAIClient(client=MagicMock(), model="gpt-4o-mini")
     client.call_client("color?", ignore_history=True, images=[PNG_1X1])

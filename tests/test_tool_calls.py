@@ -5,7 +5,12 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from rwu_llmconnector.llmconnector import call_requested_tools, resolve_max_output_tokens
+from rwu_llmconnector.llmconnector import (
+    call_requested_tools,
+    extract_chat_completion_stats,
+    llm_call_result,
+    resolve_max_output_tokens,
+)
 from rwu_llmconnector.ollama_client import OllamaClient
 from rwu_llmconnector.openai_client import OpenAIClient
 
@@ -15,6 +20,20 @@ def _tool_call(name, arguments, tool_call_id="call-1"):
         id=tool_call_id,
         function=SimpleNamespace(name=name, arguments=arguments),
     )
+
+
+def test_extract_chat_completion_stats_reads_lmstudio_extension():
+    stats = extract_chat_completion_stats(
+        {
+            "stats": {
+                "time_to_first_token_seconds": 0.081,
+                "tokens_per_second": 42.3,
+            }
+        }
+    )
+    assert stats["time_to_first_token_seconds"] == 0.081
+    assert stats["tokens_per_second"] == 42.3
+    assert extract_chat_completion_stats({"stats": {}}) is None
 
 
 def test_resolve_max_output_tokens_prefers_explicit_and_alias():
@@ -31,6 +50,8 @@ def test_openai_call_client_maps_max_output_tokens(mock_call_client):
         1,
         0,
         0.1,
+        None,
+        None,
     )
     client = OpenAIClient(client=MagicMock(), model="gpt-4o-mini", max_output_tokens=64)
     client.call_client("hi", ignore_history=True, max_output_tokens=128)
@@ -112,6 +133,8 @@ def test_call_client_with_tools_follows_up_after_tool_calls(mock_call_client):
             2,
             0,
             0.1,
+            None,
+            None,
         ),
         (
             SimpleNamespace(
@@ -122,24 +145,24 @@ def test_call_client_with_tools_follows_up_after_tool_calls(mock_call_client):
             3,
             0,
             0.2,
+            None,
+            None,
         ),
     ]
 
     client = OpenAIClient(client=MagicMock(), model="gpt-4o-mini")
-    response, prompt_tokens, completion_tokens, reasoning_tokens, runtime = (
-        client.call_client_with_tools(
-            "use echo",
-            tools=[{"type": "function", "function": {"name": "echo"}}],
-            tool_mapping={"echo": lambda text: {"text": text}},
-            ignore_history=True,
-        )
+    result = client.call_client_with_tools(
+        "use echo",
+        tools=[{"type": "function", "function": {"name": "echo"}}],
+        tool_mapping={"echo": lambda text: {"text": text}},
+        ignore_history=True,
     )
 
-    assert response == "done"
-    assert prompt_tokens == 15
-    assert completion_tokens == 5
-    assert reasoning_tokens == 0
-    assert runtime == pytest.approx(0.3)
+    assert result.text == "done"
+    assert result.prompt_tokens == 15
+    assert result.completion_tokens == 5
+    assert result.reasoning_tokens == 0
+    assert result.runtime == pytest.approx(0.3)
     assert mock_call_client.call_count == 2
     follow_up_messages = mock_call_client.call_args_list[1].args[0]["messages"]
     assert follow_up_messages[-1]["role"] == "tool"
@@ -148,16 +171,16 @@ def test_call_client_with_tools_follows_up_after_tool_calls(mock_call_client):
 
 @patch("rwu_llmconnector.openai_client.OpenAIClient.call_client_with_tools")
 def test_send_request_routes_to_call_client_with_tools(mock_call_client_with_tools):
-    mock_call_client_with_tools.return_value = ("done", 1, 2, 0, 0.5)
+    mock_call_client_with_tools.return_value = llm_call_result("done", 1, 2, 0, 0.5)
     client = OpenAIClient(client=MagicMock(), model="gpt-4o-mini")
 
-    response, *_ = client.send_request(
+    result = client.send_request(
         "use echo",
         tools=[{"type": "function", "function": {"name": "echo"}}],
         tool_mapping={"echo": lambda text: {"text": text}},
     )
 
-    assert response == "done"
+    assert result.text == "done"
     mock_call_client_with_tools.assert_called_once()
     assert mock_call_client_with_tools.call_args.args[1] == [
         {"type": "function", "function": {"name": "echo"}}
@@ -207,20 +230,18 @@ def test_ollama_call_client_with_tools_follows_up_after_tool_calls(mock_call_cli
 
     client = OllamaClient(model="llama3.2")
     client.client = MagicMock()
-    response, prompt_tokens, completion_tokens, reasoning_tokens, runtime = (
-        client.call_client_with_tools(
-            "what is the weather in tokyo?",
-            tools=[{"type": "function", "function": {"name": "get_weather"}}],
-            tool_mapping={"get_weather": lambda city: f"{city}: 20 degrees"},
-            ignore_history=True,
-        )
+    result = client.call_client_with_tools(
+        "what is the weather in tokyo?",
+        tools=[{"type": "function", "function": {"name": "get_weather"}}],
+        tool_mapping={"get_weather": lambda city: f"{city}: 20 degrees"},
+        ignore_history=True,
     )
 
-    assert response == "It is 20 degrees in Tokyo."
-    assert prompt_tokens == 18
-    assert completion_tokens == 7
-    assert reasoning_tokens == 0
-    assert runtime == pytest.approx(0.3)
+    assert result.text == "It is 20 degrees in Tokyo."
+    assert result.prompt_tokens == 18
+    assert result.completion_tokens == 7
+    assert result.reasoning_tokens == 0
+    assert result.runtime == pytest.approx(0.3)
     assert mock_call_client.call_count == 2
     follow_up_messages = mock_call_client.call_args_list[1].args[0]["messages"]
     assert follow_up_messages[-1]["role"] == "tool"

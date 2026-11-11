@@ -5,7 +5,12 @@ import time
 from google.genai import types
 
 from rwu_llmconnector.image_input import resolve_image_sources
-from rwu_llmconnector.llmconnector import LLMClient, default_logger, log_api_exception
+from rwu_llmconnector.llmconnector import (
+    LLMClient,
+    default_logger,
+    llm_call_result,
+    log_api_exception,
+)
 
 
 class GeminiClient(LLMClient):
@@ -120,6 +125,7 @@ class GeminiClient(LLMClient):
             The API model id is currently fixed to ``gemini-2.5-flash-lite`` in the request.
         """
         log = self._resolve_logger(logger)
+        log_metrics = kwargs.pop("log_metrics", True)
         images = kwargs.pop("images", None)
         resolved_images = resolve_image_sources(images)
         system_instruction = "" if system_message is None else system_message
@@ -162,12 +168,20 @@ class GeminiClient(LLMClient):
         except Exception as e:
             runtime = time.time() - start
             log_api_exception(log, e, provider="Gemini")
-            return f"Error: Gemini API call failed: {e}", 0, 0, 0, runtime
+            return self._finish_call_result(
+                log,
+                llm_call_result(f"Error: Gemini API call failed: {e}", runtime=runtime),
+                log_metrics=log_metrics,
+            )
         runtime = time.time() - start
         message = response.text or ""
         if not message.strip():
             log.error("Error: No valid response from Gemini API.")
-            return "Error: No valid response from Gemini API.", 0, 0, 0, runtime
+            return self._finish_call_result(
+                log,
+                llm_call_result("Error: No valid response from Gemini API.", runtime=runtime),
+                log_metrics=log_metrics,
+            )
         log.debug(f"history: {message}")
         user_history = "" if constraints is None else constraints
         user_history += (
@@ -184,4 +198,14 @@ class GeminiClient(LLMClient):
             completion_tokens = response.usage_metadata.candidates_token_count
             reasoning_tokens = response.usage_metadata.thoughts_token_count
             reasoning_tokens = reasoning_tokens if reasoning_tokens is not None else 0
-        return message, prompt_tokens, completion_tokens, reasoning_tokens, runtime
+        return self._finish_call_result(
+            log,
+            llm_call_result(
+                message,
+                prompt_tokens,
+                completion_tokens,
+                reasoning_tokens,
+                runtime,
+            ),
+            log_metrics=log_metrics,
+        )

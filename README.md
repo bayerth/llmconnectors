@@ -29,7 +29,7 @@ pip install rwu-llmconnector
 All provider clients inherit from `LLMClient` and share `send_request()`:
 
 ```python
-response, prompt_tokens, completion_tokens, reasoning_tokens, runtime = llm.send_request(
+result = llm.send_request(
     user_message,
     system_message=None,
     ignore_history=False,
@@ -40,15 +40,33 @@ response, prompt_tokens, completion_tokens, reasoning_tokens, runtime = llm.send
     max_output_tokens=None,  # generation cap (alias: max_tokens via kwargs)
     logger=None,         # per-request logger; default: client instance logger
     images=None,         # multimodal: paths, bytes, data URLs (provider support varies)
-    **kwargs,            # e.g. tool_mapping, timeout, context_length (LM Studio)
+    **kwargs,            # e.g. tool_mapping, timeout, context_length (LM Studio), stream=True
 )
+print(result.text)
+print(result.time_to_first_token)  # seconds, when the provider reports or stream=True (OpenAI)
 ```
+
+`send_request()` and `call_client()` return an **`LLMCallResult`**:
+
+| Field | Meaning |
+|-------|---------|
+| `text` | Assistant reply (or `Error: ...`) |
+| `prompt_tokens`, `completion_tokens`, `reasoning_tokens` | Usage |
+| `runtime` | Wall-clock seconds for `send_request`; provider HTTP time for `call_client` |
+| `time_to_first_token` | Optional (LM Studio native `stats`; OpenAI `stream=True` or server `stats`) |
+| `tokens_per_second` | Optional **server** decode rate (LM Studio `stats`; not wall-clock) |
+| `tokens_per_second_generation` | Decode rate: server value if set, else `output_tokens / (runtime - ttft)` |
+| `tokens_per_second_wall` | `output_tokens / runtime` (includes TTFT — only a rough headline number) |
+| `extras` | Provider-specific dict (e.g. LM Studio `response_id`) |
+| `failed` | `True` if `text` starts with `Error:` |
+
+Migration from 0.4.x: `result.as_tuple()` returns the former 5-tuple.
 
 `images` is a list of file paths, raw `bytes`, `data:image/...;base64,...` strings, `https://...` URLs (OpenAI / Responses only), or dicts such as `{"path": "..."}` / `{"data_url": "..."}`. Conversation `history` stores **text only**; re-attach images on later turns if needed.
 
-`send_request_perf(...)` accepts the same arguments and returns `(runtime, tokens_per_second, response_message)` instead of token breakdown.
+Successful requests log a **unified INFO line** from `LLMClient._log_request_metrics`: `runtime`, optional **`ttft`**, tokens/s (`gen` / `server` / `wall`), and token counts. Provider-specific detail stays at DEBUG.
 
-**Logging:** Clients use `default_logger` at **INFO** (request start/end, token summary, errors). Pass `logger=` to the client constructor or to `send_request` / `send_request_perf` / `call_client` / `call_client_with_tools` to override for a single call. For a custom sink, use `get_print_logger(name, msg_producer=..., level=logging.DEBUG)`.
+**Logging:** Clients use `default_logger` at **INFO** (request start/end, token summary, errors). Pass `logger=` to the client constructor or to `send_request` / `call_client` / `call_client_with_tools` to override for a single call. For a custom sink, use `get_print_logger(name, msg_producer=..., level=logging.DEBUG)`.
 
 ```python
 import logging
@@ -60,7 +78,7 @@ llm = OpenAIClient(client, model="gpt-4o-mini", logger=verbose)
 llm.send_request("Hi", logger=verbose)  # same or different logger per call
 ```
 
-**Errors:** Provider HTTP/SDK failures return a tuple whose first element is a string starting with `Error:` (never `None`). Check with `is_error_response(response)` or `response.startswith("Error:")`. Details are logged at ERROR (including response bodies when available). `send_request` skips the success token summary and does **not** update cumulative counters on those failures. Tool misconfiguration and handler bugs still raise exceptions; `send_request` logs them with `logger.exception(...)` and re-raises.
+**Errors:** Provider HTTP/SDK failures set `result.text` to a string starting with `Error:` (never `None`). Check with `result.failed` or `is_error_response(result.text)`. Details are logged at ERROR (including response bodies when available). `send_request` skips the success token summary and does **not** update cumulative counters on those failures. Tool misconfiguration and handler bugs still raise exceptions; `send_request` logs them with `logger.exception(...)` and re-raises.
 
 **Output token cap (`max_output_tokens`):** limits **generated** tokens only (not prompt/context size). Per-call values override the client default; the instance attribute is not mutated. Mapping: OpenAI → `max_completion_tokens`; LM Studio → `max_output_tokens`; Ollama → `num_predict`. Alias: `max_tokens`.
 
@@ -75,6 +93,7 @@ llm.send_request("...", context_length=8192)             # LM Studio only
 
 ```python
 from rwu_llmconnector import (
+    LLMCallResult,
     LLMClient,
     OpenAIClient,
     OpenAIResponsesClient,
@@ -87,6 +106,7 @@ from rwu_llmconnector import (
     default_logger,
     get_print_logger,
     is_error_response,
+    llm_call_result,
 )
 ```
 
@@ -108,23 +128,23 @@ from rwu_llmconnector import OpenAIClient
 client = OpenAI(api_key="your-openai-api-key")
 llm = OpenAIClient(client, model="gpt-4o-mini")
 
-response, prompt_tokens, completion_tokens, reasoning_tokens, runtime = llm.send_request(
+result = llm.send_request(
     "What is PyPI?",
     system_message="you are a helpful assistant",
 )
-print(response)
+print(result.text)
 ```
 
 Pass `max_output_tokens` (or `max_tokens`) to cap the assistant reply; OpenAI receives `max_completion_tokens`:
 
 ```python
-response, *_ = llm.send_request("What is PyPI?", max_output_tokens=256)
+result = llm.send_request("What is PyPI?", max_output_tokens=256)
 ```
 
 #### Vision (images)
 
 ```python
-response, *_ = llm.send_request(
+result = llm.send_request(
     "What is in this image?",
     images=["/path/to/photo.png"],
     ignore_history=True,
@@ -150,7 +170,7 @@ schema = {
     "additionalProperties": False,
 }
 
-response, *_ = llm.send_request(
+result = llm.send_request(
     "Rate PyPI in one sentence.",
     json_schema=schema,
     json_schema_name="rating",
@@ -158,7 +178,7 @@ response, *_ = llm.send_request(
 )
 # or: response_format=build_json_schema_response_format("rating", schema)
 import json
-data = json.loads(response)
+data = json.loads(result.text)
 ```
 
 Some reasoning models return JSON in `reasoning_content`; the client falls back to that field when `content` is empty (common with local OpenAI-compatible hosts).
@@ -185,7 +205,7 @@ tools = [
     }
 ]
 
-response, *_ = llm.send_request(
+result = llm.send_request(
     "echo hello",
     tools=tools,
     tool_mapping={"echo": lambda text: {"text": text}},
@@ -208,7 +228,7 @@ from rwu_llmconnector import OpenAIResponsesClient
 client = OpenAI(api_key="your-openai-api-key")
 llm = OpenAIResponsesClient(client, model="gpt-4o-mini")
 
-response, *_ = llm.send_request(
+result = llm.send_request(
     "What is PyPI?",
     system_message="you are a helpful assistant",
     max_output_tokens=512,
@@ -233,7 +253,7 @@ llm.send_request("Follow-up")  # chains via previous_response_id
 Vision on the Responses API:
 
 ```python
-response, *_ = llm.send_request(
+result = llm.send_request(
     "Describe the image.",
     images=["screenshot.png"],
     ignore_history=True,
@@ -250,7 +270,7 @@ schema = {
     "additionalProperties": False,
 }
 
-response, *_ = llm.send_request(
+result = llm.send_request(
     "Summarize PyPI in one line.",
     json_schema=schema,
     json_schema_name="summary",
@@ -284,11 +304,11 @@ client = OpenAI(
 )
 llm = OpenAIClient(client, model="gpt-4o-mini")
 
-response, prompt_tokens, completion_tokens, reasoning_tokens, runtime = llm.send_request(
+result = llm.send_request(
     "What is PyPI?",
     system_message="you are a helpful assistant",
 )
-print(response)
+print(result.text)
 ```
 
 Same limits as OpenAI: optional `max_output_tokens` on `OpenAIClient(..., max_output_tokens=256)` or on each `send_request(..., max_output_tokens=256)` (alias `max_tokens`); forwarded as `max_completion_tokens` to the API.
@@ -304,17 +324,17 @@ from rwu_llmconnector import GeminiClient
 client = genai.Client(api_key="your-gemini-api-key")
 llm = GeminiClient(client, model="gemini-2.5-flash-lite")
 
-response, *_ = llm.send_request(
+result = llm.send_request(
     "What is PyPI?",
     system_message="you are a helpful assistant",
 )
-print(response)
+print(result.text)
 ```
 
 Vision (skips the XML prompt template when `images` is set; uses native multimodal `generate_content`):
 
 ```python
-response, *_ = llm.send_request(
+result = llm.send_request(
     "What is shown?",
     images=["diagram.png"],
     ignore_history=True,
@@ -328,11 +348,11 @@ from rwu_llmconnector import OllamaClient
 
 llm = OllamaClient(model="llama3.2", host="http://localhost:11434")
 
-response, *_ = llm.send_request(
+result = llm.send_request(
     "What is PyPI?",
     system_message="you are a helpful assistant",
 )
-print(response)
+print(result.text)
 ```
 
 `max_output_tokens` maps to Ollama `num_predict` in chat `options`.
@@ -340,7 +360,7 @@ print(response)
 Vision ([Ollama images](https://github.com/ollama/ollama/blob/main/docs/api.md#request-with-images)) — use a vision-capable model (e.g. `llava`):
 
 ```python
-response, *_ = llm.send_request(
+result = llm.send_request(
     "What is in the image?",
     images=["photo.jpg"],
     ignore_history=True,
@@ -365,7 +385,7 @@ tools = [
     }
 ]
 
-response, *_ = llm.send_request(
+result = llm.send_request(
     "what is the weather in Toronto?",
     tools=tools,
     tool_mapping={"get_weather": lambda city: f"{city}: 11 degrees celsius"},
@@ -390,11 +410,11 @@ llm = LMStudioClient(
     # max_output_tokens=512,
 )
 
-response, prompt_tokens, completion_tokens, reasoning_tokens, runtime = llm.send_request(
+result = llm.send_request(
     "What is PyPI?",
     system_message="you are a helpful assistant",
 )
-print(response)
+print(result.text)
 ```
 
 **Context and limits**
@@ -409,7 +429,7 @@ Do not set `context_length` unless you mean to — a value that does not match t
 **Vision (native `/api/v1/chat`)** — `input` items with `type: "image"` and `data_url` (base64 data URL):
 
 ```python
-response, *_ = llm.send_request(
+result = llm.send_request(
     "Describe the picture.",
     images=["/path/to/image.png"],
     ignore_history=True,
@@ -442,15 +462,15 @@ llm = LMStudioClient(
     integrations=[mcp_hf],
 )
 
-response_msg, prompt_tokens, completion_tokens, reasoning_tokens, runtime = llm.send_request(
+result = llm.send_request(
     "list 3 new papers",
     ignore_history=True,
     timeout=120,
 )
-print(response_msg)
+print(result.text)
 print(
-    f"prompt tokens: {prompt_tokens}, completion_tokens: {completion_tokens}, "
-    f"reasoning_tokens: {reasoning_tokens}, runtime: {runtime:.2f} seconds"
+    f"prompt tokens: {result.prompt_tokens}, completion_tokens: {result.completion_tokens}, "
+    f"reasoning_tokens: {result.reasoning_tokens}, runtime: {result.runtime:.2f} seconds"
 )
 ```
 
@@ -469,7 +489,7 @@ class MyMCP:
 
 llm = LMStudioClient(model="your-model")
 llm.add_integration(MyMCP())
-response, *_ = llm.send_request("hi", ignore_history=True)
+result = llm.send_request("hi", ignore_history=True)
 ```
 
 ### Model loader helpers

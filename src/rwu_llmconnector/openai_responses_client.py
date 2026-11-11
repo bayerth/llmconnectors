@@ -11,6 +11,7 @@ from rwu_llmconnector.llmconnector import (
     convert_chat_completion_tools_to_responses,
     execute_responses_function_calls,
     extract_responses_function_calls,
+    llm_call_result,
     log_api_exception,
     responses_output_items_for_input,
 )
@@ -138,12 +139,12 @@ class OpenAIResponsesClient(LLMClient):
             return None, 0, 0, 0, runtime
 
         prompt_tokens, completion_tokens, reasoning_tokens = self._extract_usage(response)
-        log.info(
+        log.debug(
             f"Token usage - Prompt: {prompt_tokens:,.0f}, "
             f"Completion: {completion_tokens:,.0f}, Reasoning: {reasoning_tokens:,.0f}"
         )
         if runtime > 0 and completion_tokens:
-            log.info(f"Tokens per second: {completion_tokens / runtime:.2f}")
+            log.debug(f"Tokens per second: {completion_tokens / runtime:.2f}")
         return response, prompt_tokens, completion_tokens, reasoning_tokens, runtime
 
     def _response_text(self, response):
@@ -237,6 +238,7 @@ class OpenAIResponsesClient(LLMClient):
         **kwargs,
     ):
         log = self._resolve_logger(logger)
+        log_metrics = kwargs.pop("log_metrics", True)
         log.debug("Calling OpenAIResponsesClient with tool support")
         images = kwargs.pop("images", None)
         text_config = resolve_responses_text_config(kwargs)
@@ -270,7 +272,17 @@ class OpenAIResponsesClient(LLMClient):
         if response is None:
             message = "Error: No valid response from Responses API."
             log.error(message)
-            return message, prompt_tokens, completion_tokens, reasoning_tokens, runtime
+            return self._finish_call_result(
+                log,
+                llm_call_result(
+                    message,
+                    prompt_tokens,
+                    completion_tokens,
+                    reasoning_tokens,
+                    runtime,
+                ),
+                log_metrics=log_metrics,
+            )
 
         if getattr(response, "id", None):
             self.last_response_id = response.id
@@ -281,7 +293,18 @@ class OpenAIResponsesClient(LLMClient):
         self.history.append({"role": "assistant", "content": response_content})
         if write_to_file:
             self.write_json(self.history, filename=self.filename)
-        return response_content, prompt_tokens, completion_tokens, reasoning_tokens, runtime
+        return self._finish_call_result(
+            log,
+            llm_call_result(
+                response_content,
+                prompt_tokens,
+                completion_tokens,
+                reasoning_tokens,
+                runtime,
+                extras={"response_id": getattr(response, "id", None)},
+            ),
+            log_metrics=log_metrics,
+        )
 
     def call_client(
         self,
@@ -297,6 +320,7 @@ class OpenAIResponsesClient(LLMClient):
         **kwargs,
     ):
         log = self._resolve_logger(logger)
+        log_metrics = kwargs.pop("log_metrics", True)
         images = kwargs.pop("images", None)
         text_config = resolve_responses_text_config(kwargs)
         resolved_model = self.model if model is None else model
@@ -324,7 +348,17 @@ class OpenAIResponsesClient(LLMClient):
         if response is None:
             message = "Error: No valid response from Responses API."
             log.error(message)
-            return message, prompt_tokens, completion_tokens, reasoning_tokens, runtime
+            return self._finish_call_result(
+                log,
+                llm_call_result(
+                    message,
+                    prompt_tokens,
+                    completion_tokens,
+                    reasoning_tokens,
+                    runtime,
+                ),
+                log_metrics=log_metrics,
+            )
 
         if getattr(response, "id", None):
             self.last_response_id = response.id
@@ -333,11 +367,32 @@ class OpenAIResponsesClient(LLMClient):
         if not response_content.strip():
             message = "Error: No valid response from Responses API."
             log.error(message)
-            return message, prompt_tokens, completion_tokens, reasoning_tokens, runtime
+            return self._finish_call_result(
+                log,
+                llm_call_result(
+                    message,
+                    prompt_tokens,
+                    completion_tokens,
+                    reasoning_tokens,
+                    runtime,
+                ),
+                log_metrics=log_metrics,
+            )
 
         log.debug(f"Responses output: {response_content}")
         self.history.append({"role": "user", "content": user_message})
         self.history.append({"role": "assistant", "content": response_content})
         if write_to_file:
             self.write_json(self.history, filename=self.filename)
-        return response_content, prompt_tokens, completion_tokens, reasoning_tokens, runtime
+        return self._finish_call_result(
+            log,
+            llm_call_result(
+                response_content,
+                prompt_tokens,
+                completion_tokens,
+                reasoning_tokens,
+                runtime,
+                extras={"response_id": getattr(response, "id", None)},
+            ),
+            log_metrics=log_metrics,
+        )
